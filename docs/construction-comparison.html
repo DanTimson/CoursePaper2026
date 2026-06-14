@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph construction: divide-and-conquer merge vs NN-Descent</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d26; --ink:#e6edf3; --muted:#8b98a9;
+    --line:#2a3441; --accent:#5aa9e6; --accent2:#e6a15a;
+    --good:#5ad6a0; --warn:#e65a7a;
+    --p0:#5aa9e6; --p1:#e6a15a; --p2:#a05ae6; --p3:#5ad6a0;
+    --p4:#e6d65a; --p5:#e65a7a; --p6:#5ae6d6; --p7:#e65ab0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 22px 10px}
+  h1{font-size:19px;margin:0 0 4px;font-weight:650}
+  .sub{color:var(--muted);font-size:13px;max-width:1000px}
+  .disclaimer{color:var(--accent2);font-size:12px;margin-top:6px}
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+    padding:12px 22px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+    background:var(--panel)}
+  .controls label{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px}
+  .controls input[type=range]{width:90px}
+  button{background:#222c39;color:var(--ink);border:1px solid var(--line);
+    border-radius:7px;padding:7px 14px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:#08121c;border-color:var(--accent);font-weight:600}
+  .stage{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+  .col{background:var(--bg);padding:16px 18px}
+  .col h2{font-size:15px;margin:0 0 2px}
+  .col .tag{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .phase{margin:8px 0;min-height:38px;font-size:13px;color:var(--ink)}
+  .phase b{color:var(--accent)}
+  canvas{width:100%;height:auto;background:#0b0f14;border-radius:8px;border:1px solid var(--line)}
+  .metrics{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
+  .metric{font-size:12px;color:var(--muted)}
+  .metric b{display:block;font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .metric.dist b{color:var(--accent2)} .metric.rec b{color:var(--good)}
+  .notes{padding:18px 22px;border-top:1px solid var(--line)}
+  .notes h3{font-size:14px;margin:0 0 8px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px;max-width:1100px}
+  .grid2 ul{margin:4px 0;padding-left:18px;color:var(--muted)}
+  .grid2 li{margin:5px 0} .grid2 li b{color:var(--ink);font-weight:600}
+  .sim{border-left:3px solid var(--good);padding-left:12px}
+  .dif{border-left:3px solid var(--accent2);padding-left:12px}
+  @media(max-width:860px){.stage,.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Building a navigable graph: divide-and-conquer merge vs NN-Descent</h1>
+  <div class="sub">The two construction paradigms the task contrasts, run side by side on the same points.
+    <b style="color:var(--p0)">Left</b>: partition → build sub-graphs → stitch pairwise (the Elasticsearch-style
+    merge, applied divide-and-conquer). <b style="color:var(--p1)">Right</b>: NN-Descent — random init then
+    iterative neighbour-of-neighbour refinement. Distance-computation counters and k-NN recall update live.</div>
+  <div class="disclaimer">Illustrative simplifications of each algorithm for intuition — not the exact ES/NN-Descent code,
+    and not a benchmark (the quantitative results come from the SIFT1M runs). Use the <b>stitch</b> selector to
+    switch the merge variant — ES, NGM, IGTM, CGTM differ only in this step, and the distance counter shifts
+    accordingly (mechanism is faithful; absolute counts are illustrative).</div>
+</header>
+
+<div class="controls">
+  <button id="play" class="primary">▶ Play</button>
+  <button id="step">Step</button>
+  <button id="reset">Reset</button>
+  <button id="snap">⤓ PNG</button>
+  <label>points <input type="range" id="n" min="60" max="320" step="20" value="160"><span id="nv">160</span></label>
+  <label>k / degree <input type="range" id="k" min="3" max="10" step="1" value="6"><span id="kv">6</span></label>
+  <label>partitions <input type="range" id="p" min="2" max="8" step="1" value="4"><span id="pv">4</span></label>
+  <label>stitch <select id="variant"><option value="ES">ES (generic)</option><option value="NGM">NGM</option><option value="IGTM">IGTM</option><option value="CGTM">CGTM</option></select></label>
+  <label>speed <input type="range" id="spd" min="1" max="40" step="1" value="6"></label>
+</div>
+
+<div class="stage">
+  <div class="col">
+    <div class="tag">divide &amp; conquer</div>
+    <h2 style="color:var(--p0)">Merge construction</h2>
+    <div class="phase" id="phaseM">Idle. Press Play.</div>
+    <canvas id="cM" width="560" height="420"></canvas>
+    <div class="metrics">
+      <div class="metric dist">distance comps<b id="distM">0</b></div>
+      <div class="metric rec">k-NN recall<b id="recM">0.00</b></div>
+      <div class="metric">edges<b id="edgM">0</b></div>
+      <div class="metric">components<b id="compM">1</b></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="tag">iterative refinement</div>
+    <h2 style="color:var(--p1)">NN-Descent</h2>
+    <div class="phase" id="phaseN">Idle. Press Play.</div>
+    <canvas id="cN" width="560" height="420"></canvas>
+    <div class="metrics">
+      <div class="metric dist">distance comps<b id="distN">0</b></div>
+      <div class="metric rec">k-NN recall<b id="recN">0.00</b></div>
+      <div class="metric">iteration<b id="itN">0</b></div>
+      <div class="metric">components<b id="compN">1</b></div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div class="grid2">
+    <div class="sim">
+      <h3 style="color:var(--good)">Similarities</h3>
+      <ul>
+        <li>Both build an <b>approximate proximity graph</b> for greedy nearest-neighbour search, and both
+          converge toward the true k-NN graph (watch both recall counters climb).</li>
+        <li>Both exploit that <b>neighbours of neighbours are likely neighbours</b> — merge reuses already-built
+          sub-graph structure via graph search; NN-Descent propagates it across iterations.</li>
+        <li>Both avoid brute-force O(n²) construction and concentrate distance work where it pays off.</li>
+      </ul>
+    </div>
+    <div class="dif">
+      <h3 style="color:var(--accent2)">Differences</h3>
+      <ul>
+        <li><b>Shape of the work:</b> merge = partition → independent sub-builds → hierarchical pairwise
+          stitching (a tree, parallel across partitions). NN-Descent = global synchronous rounds over all nodes.</li>
+        <li><b>Hierarchy &amp; navigability:</b> merge preserves the HNSW layers and an entry point (navigable).
+          NN-Descent yields a flat k-NN graph — no hierarchy, no designated entry.</li>
+        <li><b>Connectivity:</b> the flat k-NN graph has <b>no connectivity guarantee</b> — on well-separated
+          clusters it converges to <i>several</i> components (watch the components counter), since each point's
+          true neighbours stay within its own cluster. Merge stays navigable and tends to a single component by
+          stitching across the seam. This is why the NN-Descent panel can look like two separate groups.</li>
+        <li><b>The seam:</b> merge's hard part is repairing cross-partition connectivity; NN-Descent has no
+          partitions, so no seam, but pays a global iteration cost instead.</li>
+        <li><b>Incrementality:</b> merge is native to Elasticsearch/Lucene, which builds HNSW per segment and
+          must merge segments; NN-Descent is a from-scratch builder.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const PCOL=["--p0","--p1","--p2","--p3","--p4","--p5","--p6","--p7"]
+  .map(v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+const ACC_M="#7cc4ff", ACC_N="#ffb066";
+
+// ---------- geometry / shared ----------
+let pts=[], trueKNN=[], N=160, K=6, P=4;
+const W=560,H=420,PAD=26;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function dist(i,j){const a=pts[i],b=pts[j];const dx=a.x-b.x,dy=a.y-b.y;return Math.sqrt(dx*dx+dy*dy);}
+function genPoints(){
+  pts=[];const blobs=4;const cx=[],cy=[];
+  for(let b=0;b<blobs;b++){cx.push(rnd(PAD+40,W-PAD-40));cy.push(rnd(PAD+40,H-PAD-40));}
+  for(let i=0;i<N;i++){const b=i%blobs;
+    pts.push({x:Math.max(PAD,Math.min(W-PAD,cx[b]+rnd(-55,55))),
+              y:Math.max(PAD,Math.min(H-PAD,cy[b]+rnd(-55,55)))});}
+}
+function computeTrueKNN(){
+  trueKNN=[];
+  for(let i=0;i<N;i++){const d=[];for(let j=0;j<N;j++) if(j!==i) d.push([j,dist(i,j)]);
+    d.sort((a,b)=>a[1]-b[1]); trueKNN.push(new Set(d.slice(0,K).map(x=>x[0])));}
+}
+function recallOf(adj){let s=0;
+  for(let i=0;i<N;i++){let c=0;for(const j of adj[i]) if(trueKNN[i].has(j)) c++; s+=Math.min(c,K)/K;}
+  return s/N;}
+function components(adj){            // undirected connected-component count (k-NN adj is directed)
+  const u=Array.from({length:N},()=>new Set());
+  for(let i=0;i<N;i++) for(const j of (adj[i]||[])){u[i].add(j);u[j].add(i);}
+  const seen=new Array(N).fill(false);let comp=0;
+  for(let s=0;s<N;s++){ if(seen[s]) continue; comp++; const st=[s];seen[s]=true;
+    while(st.length){const v=st.pop();for(const w of u[v]) if(!seen[w]){seen[w]=true;st.push(w);}}}
+  return comp;}
+
+// ---------- MERGE side (divide & conquer), one node per unit ----------
+const M={adj:[],dc:0,parts:[],variant:"ES",phase:0,bi:0,bj:0,tree:[],
+         curA:null,curB:null,stitchQ:[],acc:0,active:[],newEdges:[],desc:""};
+function mergePartition(){
+  const order=[...Array(N).keys()].sort((a,b)=>pts[a].x-pts[b].x);
+  M.parts=Array.from({length:P},()=>[]);
+  order.forEach((idx,r)=>{M.parts[Math.floor(r*P/N)].push(idx);});
+  pts.forEach((p,i)=>{p.part=M.parts.findIndex(g=>g.includes(i));});
+}
+function trimDeg(v){
+  const arr=[...M.adj[v]].map(u=>[u,dist(v,u)]).sort((a,b)=>a[1]-b[1]);
+  M.adj[v]=new Set(arr.slice(0,K+2).map(x=>x[0]));
+}
+function greedySearch(q,entry){
+  let cur=entry;M.dc++;let cd=dist(q,cur);let moved=true;
+  while(moved){moved=false;
+    for(const nb of (M.adj[cur]||[])){M.dc++;const d=dist(q,nb);if(d<cd){cd=d;cur=nb;moved=true;}}}
+  return cur;
+}
+function linkBest(u,scored,count){
+  for(const [v] of scored.slice(0,count)){ if(v===u) continue;
+    M.adj[u].add(v); M.adj[v].add(u); if(M.adj[v].size>K+2) trimDeg(v); }
+  if(M.adj[u].size>K+2) trimDeg(u);
+}
+function stitchNode(u,entry){            // one node's cross-stitch, per the selected variant
+  const land=greedySearch(u,entry);
+  let cand;
+  if(M.variant==="NGM"){ cand=new Set([land]);
+    for(const v of (M.adj[land]||[])){cand.add(v); for(const w of (M.adj[v]||[])) cand.add(w);} }
+  else { cand=new Set([land,...(M.adj[land]||[])]); }
+  const sc=[...cand].map(v=>{M.dc++;return [v,dist(u,v)];}).sort((x,y)=>x[1]-y[1]);
+  const n = M.variant==="NGM"?3 : M.variant==="IGTM"?1 : 2;
+  linkBest(u,sc,n);
+  const ne=sc.slice(0,n).map(x=>[u,x[0]]);
+  if(M.variant==="CGTM"){
+    const bk=[...(M.adj[land]||[])].map(v=>{M.dc++;return [v,dist(land,v)];}).sort((x,y)=>x[1]-y[1]);
+    linkBest(land,bk,1); if(bk[0]) ne.push([land,bk[0][0]]);
+  }
+  return ne;
+}
+function initMerge(){
+  M.adj=Array.from({length:N},()=>new Set());
+  M.dc=0;M.phase=1;M.bi=0;M.bj=0;M.tree=[];M.curA=null;M.curB=null;M.stitchQ=[];
+  M.acc=0;M.active=[];M.newEdges=[];M.variant=$("variant").value;
+  mergePartition();
+}
+function mergeBuildUnit(){               // insert one node into its partition's sub-graph
+  if(M.bi>=P){M.phase=2;M.tree=M.parts.slice();return false;}
+  const g=M.parts[M.bi];
+  if(g.length===0){M.bi++;M.bj=0;return false;}
+  const u=g[M.bj];const cand=[];
+  for(let t=0;t<M.bj;t++){const v=g[t];M.dc++;cand.push([v,dist(u,v)]);}
+  cand.sort((a,b)=>a[1]-b[1]);const nb=cand.slice(0,K).map(x=>x[0]);
+  M.adj[u]=new Set(nb);for(const v of nb){M.adj[v].add(u);if(M.adj[v].size>K+2)trimDeg(v);}
+  M.active=[u];M.newEdges=nb.map(v=>[u,v]);
+  M.desc=`Phase 1 — building partition <b>${M.bi+1}/${P}</b> (node ${M.bj+1}/${g.length})`;
+  M.bj++;if(M.bj>=g.length){M.bi++;M.bj=0;}
+  if(M.bi>=P){M.phase=2;M.tree=M.parts.slice();}
+  return false;
+}
+function mergeStitchUnit(){              // stitch one node across the current seam
+  if(!M.curA){
+    if(M.tree.length<=1){M.phase=3;M.active=[];M.newEdges=[];M.desc="Done — single merged graph";return true;}
+    M.curA=M.tree.shift();M.curB=M.tree.shift();
+    M.stitchQ=M.curB.map(u=>[u,M.curA[0]]);
+    if(M.variant==="NGM") M.stitchQ=M.stitchQ.concat(M.curA.map(u=>[u,M.curB[0]]));
+  }
+  const [u,entry]=M.stitchQ.shift();
+  M.newEdges=stitchNode(u,entry);M.active=[u];
+  M.desc=`Phase 2 — <b>stitching</b> (${M.variant}) across the seam — ${M.stitchQ.length} node(s) left in this pair, ${M.tree.length} group(s) waiting`;
+  if(M.stitchQ.length===0){M.tree.push(M.curA.concat(M.curB));M.curA=null;M.curB=null;}
+  return false;
+}
+function mergeUnit(){
+  if(M.phase===1) return mergeBuildUnit();
+  if(M.phase===2) return mergeStitchUnit();
+  return true;
+}
+
+// ---------- NN-DESCENT side, one node per unit ----------
+const ND={adj:[],dc:0,iter:0,phase:0,changed:0,rev:[],queue:[],acc:0,active:[],newEdges:[],desc:""};
+function initND(){
+  ND.adj=Array.from({length:N},()=>new Set());
+  ND.dc=0;ND.iter=0;ND.phase=1;ND.changed=0;ND.rev=[];ND.queue=[];
+  ND.acc=0;ND.active=[];ND.newEdges=[];
+}
+function ndRandomInit(){
+  for(let i=0;i<N;i++){while(ND.adj[i].size<K){const j=(Math.random()*N)|0;if(j!==i){ND.dc++;ND.adj[i].add(j);}}}
+}
+function ndSetupRound(){
+  ND.iter++;ND.changed=0;
+  ND.rev=Array.from({length:N},()=>new Set());
+  for(let i=0;i<N;i++) for(const j of ND.adj[i]) ND.rev[j].add(i);
+  ND.queue=[...Array(N).keys()];
+}
+function ndUnit(){
+  if(ND.phase===1){ndRandomInit();ND.phase=2;ndSetupRound();
+    ND.desc="Phase 1 — random k-NN initialisation";return false;}
+  if(ND.queue.length===0){
+    if(ND.changed<N*0.01||ND.iter>=12){ND.phase=3;ND.active=[];ND.newEdges=[];
+      ND.desc=`Converged after ${ND.iter} rounds`;return true;}
+    ndSetupRound();return false;
+  }
+  const u=ND.queue.shift();const cand=new Set();
+  for(const v of ND.adj[u]){cand.add(v);for(const w of ND.adj[v])cand.add(w);for(const w of ND.rev[v])cand.add(w);}
+  for(const v of ND.rev[u]) cand.add(v); cand.delete(u);
+  const sc=[...cand].map(v=>{ND.dc++;return [v,dist(u,v)];}).sort((a,b)=>a[1]-b[1]);
+  const keep=new Set(sc.slice(0,K).map(x=>x[0]));
+  for(const v of keep) if(!ND.adj[u].has(v)) ND.changed++;
+  ND.adj[u]=keep;ND.active=[u];ND.newEdges=[...keep].map(v=>[u,v]);
+  ND.desc=`Phase 2 — refinement round <b>${ND.iter}</b> (node ${N-ND.queue.length}/${N}, ${ND.changed} changes)`;
+  return false;
+}
+
+// ---------- drawing ----------
+function draw(cv,adj,colorByPart,active,newEdges,accent){
+  const ctx=cv.getContext("2d");ctx.clearRect(0,0,W,H);
+  ctx.lineWidth=1;ctx.strokeStyle="rgba(150,178,210,0.42)";ctx.beginPath();
+  for(let i=0;i<N;i++) for(const j of (adj[i]||[])) if(i<j){
+    ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);}
+  ctx.stroke();
+  if(newEdges&&newEdges.length){ctx.lineWidth=2.4;ctx.strokeStyle=accent;ctx.beginPath();
+    for(const [i,j] of newEdges){ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[j].x,pts[j].y);}ctx.stroke();}
+  for(let i=0;i<N;i++){ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,2.6,0,7);
+    ctx.fillStyle=colorByPart&&pts[i].part!=null?PCOL[pts[i].part%8]:"#cfdae6";ctx.fill();}
+  if(active) for(const u of active){ctx.beginPath();ctx.arc(pts[u].x,pts[u].y,6,0,7);
+    ctx.strokeStyle=accent;ctx.lineWidth=2.2;ctx.stroke();}
+}
+
+// ---------- scheduler (time-based, units/sec from speed) ----------
+let playing=false,raf=null,last=0;
+function tick(ts){
+  if(!last) last=ts;
+  const dt=Math.min(0.1,(ts-last)/1000);last=ts;
+  const ups=+$("spd").value;                 // units per second
+  M.acc+=dt*ups;ND.acc+=dt*ups;
+  let md=M.phase>=3,nd=ND.phase>=3;
+  while(M.acc>=1){M.acc--;if(mergeUnit()){md=true;break;}}
+  while(ND.acc>=1){ND.acc--;if(ndUnit()){nd=true;break;}}
+  render();
+  if(md&&nd){playing=false;$("play").textContent="▶ Play";raf=null;return;}
+  if(playing) raf=requestAnimationFrame(tick); else raf=null;
+}
+function render(){
+  draw($("cM"),M.adj,true,M.active,M.newEdges,ACC_M);
+  draw($("cN"),ND.adj,false,ND.active,ND.newEdges,ACC_N);
+  $("distM").textContent=M.dc.toLocaleString();
+  $("distN").textContent=ND.dc.toLocaleString();
+  $("recM").textContent=recallOf(M.adj).toFixed(2);
+  $("recN").textContent=recallOf(ND.adj).toFixed(2);
+  $("edgM").textContent=M.adj.reduce((s,a)=>s+a.size,0)/2|0;
+  $("itN").textContent=ND.iter;
+  $("compM").textContent=components(M.adj);
+  $("compN").textContent=components(ND.adj);
+  $("phaseM").innerHTML=M.desc||"Idle.";
+  $("phaseN").innerHTML=ND.desc||"Idle.";
+}
+function reset(){
+  if(raf)cancelAnimationFrame(raf);raf=null;playing=false;$("play").textContent="▶ Play";last=0;
+  N=+$("n").value;K=+$("k").value;P=+$("p").value;
+  genPoints();computeTrueKNN();initMerge();initND();render();
+}
+function togglePlay(){
+  playing=!playing;$("play").textContent=playing?"❚❚ Pause":"▶ Play";last=0;
+  if(playing&&!raf) raf=requestAnimationFrame(tick);
+}
+$("play").onclick=togglePlay;
+$("step").onclick=()=>{mergeUnit();ndUnit();render();};
+$("reset").onclick=reset;
+["n","k","p"].forEach(id=>$(id).oninput=e=>{$(id+"v").textContent=e.target.value;});
+["n","k","p"].forEach(id=>$(id).onchange=reset);
+$("variant").onchange=reset;
+function snapshot(){
+  const g=20, tw=W*2+g*3, th=H+62;
+  const out=document.createElement("canvas");out.width=tw;out.height=th;
+  const x=out.getContext("2d");
+  x.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||"#0f1419";
+  x.fillRect(0,0,tw,th);
+  x.fillStyle="#e6edf3";x.font="bold 15px sans-serif";
+  x.fillText(`Merge (${M.variant}) — dist ${M.dc.toLocaleString()}, recall ${recallOf(M.adj).toFixed(2)}`, g, 26);
+  x.fillText(`NN-Descent — dist ${ND.dc.toLocaleString()}, recall ${recallOf(ND.adj).toFixed(2)}, iters ${ND.iter}`, W+g*2, 26);
+  x.drawImage($("cM"), g, 40);x.drawImage($("cN"), W+g*2, 40);
+  const a=document.createElement("a");
+  a.download=`construction_${M.variant}_n${N}_p${P}.png`;a.href=out.toDataURL("image/png");a.click();
+}
+$("snap").onclick=snapshot;
+reset();
+
+</script>
+</body>
+</html>

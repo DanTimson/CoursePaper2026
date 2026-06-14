@@ -22,6 +22,7 @@ Parsers below are validated against real stdout in tests/test_hnswmerger_parse.p
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -151,7 +152,7 @@ class HNSWMergerRunner:
         self.cp = params
         self.workload = WORKLOAD.get(params.dim, "SIFT1M")
         os.makedirs(paths.workdir, exist_ok=True)
-        paths.workdir = os.path.abspath(paths.workdir)
+        paths.workdir = os.path.abspath(paths.workdir)   # binaries run with cwd=binary dir
         self.env = dict(os.environ)
         if env_threads:
             self.env["OMP_NUM_THREADS"] = str(env_threads)
@@ -166,8 +167,10 @@ class HNSWMergerRunner:
 
     def build_leaf(self, lrange: int, rrange: int) -> Tuple[str, Dict]:
         idx = os.path.join(self.p.workdir, f"leaf_{lrange}_{rrange}.hnsw")
-        if os.path.exists(idx):
-            return idx, {"build_calc": None, "build_seconds": 0.0, "cached": True}
+        meta = idx + ".meta.json"
+        if os.path.exists(idx) and os.path.exists(meta):
+            with open(meta) as f:                      # carry forward the real counts
+                return idx, {**json.load(f), "cached": True}
         cfg = os.path.join(self.p.workdir, f"build_{lrange}_{rrange}.cfg")
         _write_kv(cfg, {
             "dim": self.cp.dim, "max_elements": rrange - lrange, "nb": self.cp.nb,
@@ -175,7 +178,27 @@ class HNSWMergerRunner:
             "lrange": lrange, "rrange": rrange,
             "base_filepath": self.p.base, "index_path": idx,
         })
-        return idx, parse_builds(self._run(self.p.builds_bin, cfg))
+        b = parse_builds(self._run(self.p.builds_bin, cfg))
+        with open(meta, "w") as f:                     # so a later algo reusing this leaf gets real counts
+            json.dump({"build_calc": b["build_calc"], "build_seconds": b["build_seconds"]}, f)
+        return idx, b
+
+    def query_only(self, idx: str, method: str, total_n: int) -> Dict:
+        """Run ./exps on a single index (no merge) purely to get its recall curve.
+        The query/recall loop in experiment.cpp runs regardless of merge_method."""
+        cfg = os.path.join(self.p.workdir, f"query_{uuid.uuid4().hex[:8]}.cfg")
+        _write_kv(cfg, {
+            "workload_type": self.workload, "merge_method": method,
+            "dim": self.cp.dim, "max_elements": total_n, "nb": total_n,
+            "M": self.cp.M, "ef_construction": self.cp.ef_construction,
+            "k": self.cp.k, "kk": self.cp.kk, "nq": self.cp.nq,
+            "iterations": 1, "rerun": "true", "save_index": "false",
+            "base_filepath": self.p.base, "query_filepath": self.p.query,
+            "groundtruth_filepath": self.p.groundtruth,
+            "index_path": idx, "save_path": self.p.workdir,
+            "efs_array": ", ".join(str(e) for e in self.cp.efs_array),
+        })
+        return parse_exps(self._run(self.p.exps_bin, cfg))
 
     def merge_pair(self, idx_a: str, idx_b: str, method: str,
                    efs: List[int], total_n: int) -> Tuple[str, Dict]:
@@ -270,9 +293,15 @@ def run_hnswmerger(algo: str, n_parts: int, order: str, paths: Paths,
         build_seconds += b["build_seconds"] or 0.0
 
     if n_parts == 1:
-        # nothing to merge: a single leaf IS the index (INSERT/REBUILD style)
-        dc = {"root": leaves[0], "merge_calc": 0, "merge_seconds": 0.0,
-              "recall_curve": None}
+        # nothing to merge: the single leaf IS the index. Run a query-only ./exps
+        # so the from-scratch baseline (INSERT/REBUILD) still gets a recall curve.
+        dc = {"root": leaves[0], "merge_calc": 0, "merge_seconds": 0.0, "recall_curve": None}
+        try:
+            q = runner.query_only(leaves[0], method, total_n=params.nb)
+            dc["recall_curve"] = q.get("recall_curve")
+        except Exception as e:
+            dc["recall_curve"] = None   # binary may not support single-index query for this method
+            print(f"  (query-only recall for {algo}/n_parts=1 unavailable: {e})")
     else:
         dc = runner.divide_and_conquer(leaves, method, order, total_n=params.nb)
 

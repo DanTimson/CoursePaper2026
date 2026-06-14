@@ -184,6 +184,29 @@ partitions across the two implementations.
 
 
 
+## Figures
+
+```bash
+python scripts/make_figures.py --results results_cpp.jsonl results_sift.jsonl --out docs/figures
+```
+
+Produces `merge_cost`, `partition_scaling`, `recall_vs_qps`, `construction_time`
+(PNG + PDF) and `summary.csv`, applying the corrections below automatically.
+
+### Data hazards (handled by make_figures.py)
+
+- **`build_calc` / `build_seconds` = 0 on cached-leaf rows.** HNSWMerger reuses
+  leaf indexes across algorithms at a partition count, so only the first
+  algorithm to run records the build cost. The script imputes the shared build
+  per partition count; newer runs also carry it forward via a `.meta.json`
+  sidecar next to each leaf, so fresh data won't need imputing.
+- **Compare merge algorithms with `merge_calc`, not `total_calc`** — the build
+  cost is shared across algorithms at a partition count and would swamp the signal.
+- **`TWO_MERGE` reports `merge_calc = 0`** (not routed through the distance
+  counter) — dropped from distance plots, kept for time/recall.
+- **`INSERT`/baseline recall** is populated via a query-only run on newer adapter
+  versions; older rows may be null and are skipped where recall is required.
+
 Reference merge implementation: A. Ponomarenko,
 `github.com/aponom84/merging-navigable-graphs` (arXiv:2505.16064). NN-Descent via
 `pynndescent`. Datasets: TEXMEX SIFT1M / GIST1M.
