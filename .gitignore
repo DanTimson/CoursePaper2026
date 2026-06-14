@@ -1,0 +1,23 @@
+# vendored upstream (re-clone; unlicensed)
+vendor_repo/
+
+# datasets — download locally, never commit
+data/
+
+# C++ clone — built locally, never commit
+HNSWMerger/
+
+# caches & scratch — regenerable, machine-specific
+.ngmbench_cache*/
+.hnswmerger_work/
+
+# python env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# results — DO track these (this is the desktop->laptop sync channel)
+# (note: no results*.jsonl ignore line here)
