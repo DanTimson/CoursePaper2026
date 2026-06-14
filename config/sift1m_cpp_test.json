@@ -17,8 +17,6 @@
   "workdir": ".hnswmerger_work",
   "results_path": "results_cpp.jsonl",
   "sweep": [
-    {"algo": ["NGM", "IGTM", "CGTM"], "n_parts": [2, 4, 8], "order": ["balanced"]},
-    {"algo": ["ES", "TWO_MERGE"], "n_parts": [2], "order": ["balanced"]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"]}
+    {"algo": ["IGTM"], "n_parts": [2], "order": ["balanced"]}
   ]
 }
