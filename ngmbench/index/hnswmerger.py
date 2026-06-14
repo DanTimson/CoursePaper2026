@@ -151,6 +151,7 @@ class HNSWMergerRunner:
         self.cp = params
         self.workload = WORKLOAD.get(params.dim, "SIFT1M")
         os.makedirs(paths.workdir, exist_ok=True)
+        paths.workdir = os.path.abspath(paths.workdir)
         self.env = dict(os.environ)
         if env_threads:
             self.env["OMP_NUM_THREADS"] = str(env_threads)
