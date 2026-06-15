@@ -1,9 +1,11 @@
 {
+  "_comment": "SIFT1M. Download the TEXMEX corpus (sift.tar.gz) and point these paths at the extracted .fvecs/.ivecs. Full 1M in pure Python is slow; start with base_limit for a subset and recompute gt automatically (loader drops shipped gt when base is truncated).",
   "dataset": {
     "name": "sift1m",
     "base_path": "data/sift/sift_base.fvecs",
     "query_path": "data/sift/sift_query.fvecs",
-    "gt_path": "data/sift/sift_groundtruth.ivecs"
+    "gt_path": "data/sift/sift_groundtruth.ivecs",
+    "base_limit": 100000
   },
   "hnsw": {"m": 16, "ef": 10, "ef_construction": 32},
   "eval": {"k": 10, "ef": 64},
@@ -11,6 +13,9 @@
   "cache_dir": ".ngmbench_cache_sift",
   "results_path": "results_sift.jsonl",
   "sweep": [
+    {"builder": "merge", "algo": ["NGM", "IGTM", "CGTM"], "order": ["balanced"],
+     "n_parts": [2, 4, 8], "partition_method": ["random"]},
+    {"builder": "sigm"},
     {"builder": "nndescent"}
   ]
 }

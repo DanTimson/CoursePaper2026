@@ -187,11 +187,44 @@ partitions across the two implementations.
 ## Figures
 
 ```bash
-python scripts/make_figures.py --results results_cpp.jsonl results_sift.jsonl --out docs/figures
+python scripts/make_figures.py \
+  --results results_cpp.jsonl results_sift.jsonl results_gist_cpp.jsonl results_gist.jsonl \
+  --out docs/figures
 ```
 
-Produces `merge_cost`, `partition_scaling`, `recall_vs_qps`, `construction_time`
-(PNG + PDF) and `summary.csv`, applying the corrections below automatically.
+Writes a figure set per dataset to `docs/figures/<dataset>/` (`sift1m/`, `gist1m/`):
+`merge_cost`, `partition_scaling`, `recall_vs_qps`, `construction_time`,
+`recall_vs_buildtime` (PNG + PDF) and `summary.csv`. Rows are grouped by their
+`dataset` field, so SIFT and GIST never mix. On a `run_key` collision the **last**
+occurrence wins (a re-run supersedes an earlier row, across files in argument
+order), so you don't have to hand-prune old rows — though deleting a superseded
+results file is still cleaner. QPS uses the per-dataset query-set size
+(SIFT 10000, GIST 1000), read from each row's `nq` when present.
+
+### GIST1M runs
+
+GIST is dim 960 (~7.5x SIFT), so a full {2,4,8} merge sweep is a multi-hour job —
+confirm with the advisor whether full-scale wall-clock is needed or a subset is
+acceptable before committing to the whole grid.
+
+```bash
+# 1. fetch GIST (~2.6 GB)
+scripts/get_data.sh --gist
+
+# 2. add the GIST workload to HNSWMerger and recompile (GIST isn't built in)
+python scripts/patch_hnswmerger_gist.py /path/to/HNSW-Merger
+(cd /path/to/HNSW-Merger && make build && make exp)
+
+# 3. C++ merge family on GIST (edit config/gist1m_cpp.json binary + data paths first)
+python -m ngmbench.cli_cpp --config config/gist1m_cpp.json     # -> results_gist_cpp.jsonl
+
+# 4. NN-Descent on GIST (Python)
+python -m ngmbench.cli --config config/gist1m.json            # -> results_gist.jsonl
+
+# 5. regenerate all figures
+python scripts/make_figures.py \
+  --results results_cpp.jsonl results_sift.jsonl results_gist_cpp.jsonl results_gist.jsonl
+```
 
 ### Data hazards (handled by make_figures.py)
 

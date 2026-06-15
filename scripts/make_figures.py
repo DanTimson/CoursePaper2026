@@ -32,7 +32,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-NQ = 10000  # SIFT query-set size, for QPS = NQ / query_seconds
+NQ_BY_DATASET = {"sift1m": 10000, "gist1m": 1000}  # query-set sizes, for QPS = nq / query_seconds
+
+
+def nq_for(row):
+    return row.get("nq") or NQ_BY_DATASET.get(row.get("dataset"), 10000)
+
+
 MERGE_ALGOS = ["NGM", "IGTM", "CGTM"]
 COLORS = {"NGM": "#d1495b", "IGTM": "#2e86de", "CGTM": "#16a085",
           "ES": "#e67e22", "TWO_MERGE": "#8e44ad", "INSERT": "#7f8c8d",
@@ -45,7 +51,9 @@ plt.rcParams.update({
 
 
 def load(paths):
-    rows, seen = [], set()
+    # last occurrence of a run_key wins (latest run supersedes earlier ones),
+    # keeping the position of first appearance for stable ordering.
+    by_key = {}
     for p in paths:
         if not os.path.exists(p):
             print(f"  (skip missing {p})"); continue
@@ -54,10 +62,8 @@ def load(paths):
                 continue
             r = json.loads(line)
             key = r.get("run_key") or json.dumps(r, sort_keys=True)
-            if key in seen:
-                continue
-            seen.add(key); rows.append(r)
-    return rows
+            by_key[key] = r
+    return list(by_key.values())
 
 
 def correct(rows):
@@ -92,7 +98,7 @@ def _save(fig, out, name):
     print(f"  wrote {name}.png / .pdf")
 
 
-def fig_merge_cost(rows, out):
+def fig_merge_cost(rows, out, ds="SIFT1M"):
     parts = sorted({r["n_parts"] for r in rows
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
     fig, ax = plt.subplots(figsize=(7, 4.2))
@@ -108,12 +114,12 @@ def fig_merge_cost(rows, out):
     ax.set_xticks([i + w for i in range(len(parts))])
     ax.set_xticklabels([f"{p} partitions" for p in parts])
     ax.set_ylabel("merge-phase distance computations  (billions)")
-    ax.set_title("Merge cost by algorithm and partition count (SIFT1M)")
+    ax.set_title(f"Merge cost by algorithm and partition count ({ds})")
     ax.legend(title="algorithm")
     _save(fig, out, "merge_cost")
 
 
-def fig_partition_scaling(rows, out):
+def fig_partition_scaling(rows, out, ds="SIFT1M"):
     parts = sorted({r["n_parts"] for r in rows
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
     fig, (axc, axr) = plt.subplots(1, 2, figsize=(11, 4.2))
@@ -135,55 +141,91 @@ def fig_partition_scaling(rows, out):
     axr.set_xticks(parts); axr.set_xlabel("partitions")
     axr.set_ylabel("recall@10 (best ef)")
     axr.set_title("Recall vs partition count"); axr.legend()
-    fig.suptitle("Divide-and-conquer trades more (parallelizable) build for more merge cost and slight recall loss",
+    fig.suptitle(f"Divide-and-conquer trades more (parallelizable) build for more merge cost and slight recall loss  ({ds})",
                  fontsize=11)
     _save(fig, out, "partition_scaling")
 
 
-def fig_recall_vs_qps(rows, out, n_parts=2):
+def fig_recall_vs_qps(rows, out, ds="SIFT1M", n_parts=2):
     fig, ax = plt.subplots(figsize=(7, 4.6))
     methods = [r for r in rows if r.get("builder") == "hnswmerger"
                and r.get("n_parts") == n_parts and r.get("recall_curve")]
     order = ["IGTM", "CGTM", "NGM", "ES", "TWO_MERGE"]
     methods.sort(key=lambda r: order.index(r["algo"]) if r["algo"] in order else 99)
     for r in methods:
-        pts = [(NQ / c["query_seconds"], c["recall"]) for c in r["recall_curve"]
+        pts = [(nq_for(r) / c["query_seconds"], c["recall"]) for c in r["recall_curve"]
                if c.get("query_seconds") and c.get("recall") is not None]
         if not pts:
             continue
         xs, ys = zip(*sorted(pts))
         ax.plot(xs, ys, "o-", color=COLORS.get(r["algo"], "#555"), label=r["algo"])
-    # NN-Descent point(s) if present (single search setting)
+    # NN-Descent curve if present (epsilon sweep with query_seconds)
     for r in rows:
-        if r.get("builder") == "nndescent" and r.get("recall@10") is not None:
-            ax.scatter([], [])  # placeholder; QPS unknown unless recorded
+        if r.get("builder") == "nndescent" and r.get("recall_curve"):
+            pts = [(nq_for(r) / c["query_seconds"], c["recall"]) for c in r["recall_curve"]
+                   if c.get("query_seconds") and c.get("recall") is not None]
+            if pts:
+                xs, ys = zip(*sorted(pts))
+                ax.plot(xs, ys, "s--", color=COLORS["NNDescent"], label="NN-Descent (flat k-NN)")
     ax.set_xscale("log")
     ax.set_xlabel("queries / second  (log)")
     ax.set_ylabel("recall@10")
-    ax.set_title(f"Search quality vs speed at {n_parts} partitions (SIFT1M)")
+    ax.set_title(f"Search quality vs speed at {n_parts} partitions ({ds})")
     ax.legend(title="method")
     _save(fig, out, "recall_vs_qps")
 
 
-def fig_construction_time(rows, out, n_parts=2):
-    fig, ax = plt.subplots(figsize=(7.5, 4.2))
-    sel = [r for r in rows if r.get("builder") == "hnswmerger"
-           and (r.get("n_parts") == n_parts or r.get("algo") in ("INSERT", "REBUILD"))]
-    order = {"INSERT": 0, "IGTM": 1, "CGTM": 2, "ES": 3, "NGM": 4, "TWO_MERGE": 5}
+def fig_construction_time(rows, out, ds="SIFT1M", n_parts=2):
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    sel = [r for r in rows if (r.get("builder") == "hnswmerger"
+           and (r.get("n_parts") == n_parts or r.get("algo") in ("INSERT", "REBUILD")))
+           or r.get("builder") == "nndescent"]
+    order = {"INSERT": 0, "NNDescent": 1, "IGTM": 2, "CGTM": 3, "ES": 4, "NGM": 5, "TWO_MERGE": 6}
     sel.sort(key=lambda r: order.get(r["algo"], 99))
-    names = [r["algo"] for r in sel]
+    names = [("NN-Descent" if r["algo"] == "NNDescent" else r["algo"]) for r in sel]
     builds = [(r.get("build_seconds") or 0) for r in sel]
     merges = [r.get("merge_seconds") or 0 for r in sel]
     x = range(len(sel))
-    ax.bar(x, builds, color="#bdc3c7", label="build (leaves, shared/parallelizable)")
+    ax.bar(x, builds, color="#bdc3c7", label="build  (shared leaves for merge; full build for INSERT / NN-Descent)")
     ax.bar(x, merges, bottom=builds, color="#e67e22", label="merge")
     ax.set_xticks(list(x)); ax.set_xticklabels(names, rotation=20)
     ax.set_ylabel("construction wall-clock (s)")
-    ax.set_title(f"Construction time at {n_parts} partitions (SIFT1M)")
+    ax.set_title(f"Construction time at {n_parts} partitions ({ds})")
     top = max((b + m) for b, m in zip(builds, merges)) if sel else 1
-    ax.set_ylim(0, top * 1.22)
-    ax.legend(loc="upper center", ncol=2, frameon=True)
+    ax.set_ylim(0, top * 1.28)
+    ax.legend(loc="upper center", ncol=1, frameon=True, fontsize=9)
+    ax.text(0.5, -0.30, "NN-Descent is Numba-Python; the merge family is C++ — wall-clock is a ballpark, not a controlled comparison.",
+            transform=ax.transAxes, ha="center", fontsize=8, color="#666")
     _save(fig, out, "construction_time")
+
+
+def fig_recall_vs_buildtime(rows, out, ds="SIFT1M", n_parts=2):
+    """Cross-method overview: total construction cost vs achieved recall@10."""
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    pts = []
+    for r in rows:
+        b = r.get("builder")
+        if b == "hnswmerger" and r.get("recall@10") is not None and (
+                r.get("n_parts") == n_parts or r.get("algo") in ("INSERT", "REBUILD")):
+            t = (r.get("build_seconds") or 0) + (r.get("merge_seconds") or 0)
+            kind = "baseline" if r["algo"] in ("INSERT", "REBUILD") else "merge"
+            pts.append((r["algo"], t, r["recall@10"], kind))
+        elif b == "nndescent" and r.get("recall@10") is not None:
+            pts.append(("NNDescent", (r.get("build_seconds") or 0), r["recall@10"], "nndescent"))
+    for algo, t, rec, kind in pts:
+        marker = {"nndescent": "D", "baseline": "s"}.get(kind, "o")
+        label = "NN-Descent" if algo == "NNDescent" else algo
+        ax.scatter(t, rec, s=110, marker=marker, color=COLORS.get(algo, "#555"), zorder=3,
+                   edgecolor="white", linewidth=0.8)
+        ax.annotate(label, (t, rec), textcoords="offset points", xytext=(7, 5), fontsize=9)
+    ax.set_xlabel("total construction wall-clock (s)")
+    ax.set_ylabel("recall@10  (best query effort)")
+    ax.set_title(f"Construction cost vs achieved recall, {n_parts} partitions ({ds})")
+    ax.text(0.5, -0.32,
+            "Caveat: merge recall is best-ef on a navigable HNSW; NN-Descent recall is best-epsilon on a flat k-NN graph "
+            "(\u2260 controlled).\nNN-Descent is Numba-Python vs C++ merge — time is a ballpark.",
+            transform=ax.transAxes, ha="center", fontsize=8, color="#666")
+    _save(fig, out, "recall_vs_buildtime")
 
 
 def write_summary(rows, out):
@@ -201,21 +243,31 @@ def write_summary(rows, out):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", nargs="+",
-                    default=["results_cpp.jsonl", "results_sift.jsonl", "results.jsonl"])
+                    default=["results_cpp.jsonl", "results_sift.jsonl",
+                             "results_gist_cpp.jsonl", "results_gist.jsonl", "results.jsonl"])
     ap.add_argument("--out", default="docs/figures")
     a = ap.parse_args(argv)
     rows = correct(load(a.results))
     if not rows:
         print("no rows found"); return
-    print(f"{len(rows)} rows -> {a.out}")
-    fig_merge_cost(rows, a.out)
-    fig_partition_scaling(rows, a.out)
-    fig_recall_vs_qps(rows, a.out)
-    fig_construction_time(rows, a.out)
-    write_summary(rows, a.out)
-    if not any(r.get("builder") == "nndescent" for r in rows):
-        print("  note: no NN-Descent rows found — run config/sift1m.json (nndescent) "
-              "to add it to the comparison.")
+
+    by_ds = defaultdict(list)
+    for r in rows:
+        by_ds[r.get("dataset") or "unknown"].append(r)
+
+    for ds_key, ds_rows in sorted(by_ds.items()):
+        ds = ds_key.upper()
+        out = os.path.join(a.out, ds_key)
+        print(f"{ds_key}: {len(ds_rows)} rows -> {out}")
+        fig_merge_cost(ds_rows, out, ds)
+        fig_partition_scaling(ds_rows, out, ds)
+        fig_recall_vs_qps(ds_rows, out, ds)
+        fig_construction_time(ds_rows, out, ds)
+        fig_recall_vs_buildtime(ds_rows, out, ds)
+        write_summary(ds_rows, out)
+        if not any(r.get("builder") == "nndescent" for r in ds_rows):
+            print(f"  note: no NN-Descent rows for {ds_key} — "
+                  f"run config/{ds_key}.json (nndescent) to add it.")
 
 
 if __name__ == "__main__":
