@@ -6,3 +6,4 @@ tqdm>=4.65
 # playground only:
 streamlit>=1.30
 altair>=5.0
+matplotlib>=3.7

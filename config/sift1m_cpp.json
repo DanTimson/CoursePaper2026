@@ -1,16 +1,15 @@
 {
-  "_comment": "HNSWMerger C++ sweep. Set the two binary paths to your cloned HNSW-Merger/builds and /exps. For GIST1M: patch + recompile (scripts/patch_hnswmerger_gist.py), then set dataset.dim=960, nb=1000000, name=gist1m, nq=1000, and the gist file paths.",
   "binaries": {
-    "builds": "/home/USER/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/USER/HNSWMerger/HNSW-Merger/exps"
+    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
+    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
   },
   "dataset": {
     "name": "sift1m",
     "dim": 128,
     "nb": 1000000,
-    "base": "/home/USER/HNSWMerger/HNSW-Merger/data/sift/sift_base.fvecs",
-    "query": "/home/USER/HNSWMerger/HNSW-Merger/data/sift/sift_query.fvecs",
-    "groundtruth": "/home/USER/HNSWMerger/HNSW-Merger/data/sift/sift_groundtruth.ivecs"
+    "base": "/home/remotedt/CoursePaper2026/data/sift/sift_base.fvecs",
+    "query": "/home/remotedt/CoursePaper2026/data/sift/sift_query.fvecs",
+    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift/sift_groundtruth.ivecs"
   },
   "hnsw": {"M": 16, "ef_construction": 200},
   "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
@@ -19,6 +18,7 @@
   "sweep": [
     {"algo": ["NGM", "IGTM", "CGTM"], "n_parts": [2, 4, 8], "order": ["balanced"]},
     {"algo": ["ES", "TWO_MERGE"], "n_parts": [2], "order": ["balanced"]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"]}
+    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"]},
+    {"algo": ["SIGM"], "n_parts": [2, 4, 8], "order": ["balanced"]}
   ]
 }

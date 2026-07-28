@@ -16,3 +16,9 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+
+.*work*
+*.pkl
+*.cfg
+*.out
+*.csv

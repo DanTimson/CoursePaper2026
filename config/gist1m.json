@@ -1,5 +1,4 @@
 {
-  "_comment": "GIST1M NN-Descent (the only Python builder worth running at scale; the merge family runs on the C++ side via gist1m_cpp.json). Fetch GIST first: scripts/get_data.sh --gist. No base_limit -> full 1M so recall is comparable to the C++ GIST runs; pynndescent handles dim=960 in minutes (slower than SIFT). The builder sweeps query effort (epsilon) to produce a recall curve for recall_vs_qps.",
   "dataset": {
     "name": "gist1m",
     "base_path": "data/gist/gist_base.fvecs",

@@ -1,5 +1,4 @@
 {
-  "_comment": "GIST1M HNSWMerger C++ sweep. PREREQUISITES: (1) apply the GIST workload patch and recompile -- python scripts/patch_hnswmerger_gist.py /path/to/HNSW-Merger && (cd /path/to/HNSW-Merger && make build && make exp); (2) fetch GIST -- scripts/get_data.sh --gist. dim=960, nq=1000. NOTE: GIST is ~7.5x SIFT's dimension, so a full {2,4,8} sweep is a multi-hour job -- confirm with the advisor whether full-scale wall-clock is needed or a subset suffices before running everything.",
   "binaries": {
     "builds": "/home/USER/HNSWMerger/HNSW-Merger/builds",
     "exps": "/home/USER/HNSWMerger/HNSW-Merger/exps"
@@ -19,6 +18,7 @@
   "sweep": [
     {"algo": ["NGM", "IGTM", "CGTM"], "n_parts": [2, 4, 8], "order": ["balanced"]},
     {"algo": ["ES", "TWO_MERGE"], "n_parts": [2], "order": ["balanced"]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"]}
+    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"]},
+    {"algo": ["SIGM"], "n_parts": [2, 4, 8], "order": ["balanced"]}
   ]
 }

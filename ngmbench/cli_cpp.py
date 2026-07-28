@@ -16,6 +16,8 @@ import json
 import os
 
 from .cache import ResultsLog
+from dataclasses import replace
+
 from .index.hnswmerger import CppParams, Paths, run_hnswmerger
 
 
@@ -49,6 +51,7 @@ def main(argv=None):
         M=hp.get("M", 16), ef_construction=hp.get("ef_construction", 200),
         k=ev.get("k", 10), kk=ev.get("kk", 100), nq=ev.get("nq", 10000),
         efs_array=ev.get("efs_array", [10, 50, 100, 200]),
+        thread=conf.get("threads", 1),
     )
 
     results = ResultsLog(conf.get("results_path", "results.jsonl"))
@@ -57,24 +60,31 @@ def main(argv=None):
     runs = []
     for spec in conf.get("sweep", []):
         for s in expand(spec):
-            runs.append((s["algo"], int(s["n_parts"]), s.get("order", "balanced")))
+            runs.append((s["algo"], int(s["n_parts"]), s.get("order", "balanced"), s.get("params", {})))
 
     print(f"{len(runs)} C++ run(s) -> {results.path}")
-    for i, (algo, n_parts, order) in enumerate(runs, 1):
-        key = _run_key({"b": "hnswmerger", "ds": ds["name"], "algo": algo,
-                        "np": n_parts, "order": order, "M": params.M,
-                        "efc": params.ef_construction, "nb": params.nb})
+    for i, (algo, n_parts, order, mp) in enumerate(runs, 1):
+        p = replace(params, **mp) if mp else params
+        kd = {"b": "hnswmerger", "ds": ds["name"], "algo": algo,
+              "np": n_parts, "order": order, "M": p.M,
+              "efc": p.ef_construction, "nb": p.nb}
+        if mp:                      # gated: sweeps without a params key keep their
+            kd["mp"] = mp           # existing keys, so finished runs stay cached
+        key = _run_key(kd)
         if key in done:
             print(f"[{i}/{len(runs)}] skip (cached) {algo} parts={n_parts} {order}")
             continue
-        rec = run_hnswmerger(algo, n_parts, order, paths, params)
+        rec = run_hnswmerger(algo, n_parts, order, paths, p)
         rec["run_key"] = key
         rec["dataset"] = ds["name"]
+        rec["params"] = p.merge_id()      # resolved values, defaults included
+        rec["threads"] = p.thread
+        rec["exps_sha"] = hashlib.sha1(open(paths.exps_bin, "rb").read()).hexdigest()[:12]
         results.append(rec)
-        r = rec.get(f"recall@{params.k}")
+        r = rec.get(f"recall@{p.k}")
         print(f"[{i}/{len(runs)}] {algo:10} parts={n_parts} {order:10} "
               f"build_calc={rec['build_calc']} merge_calc={rec['merge_calc']} "
-              f"recall@{params.k}={r}")
+              f"recall@{p.k}={r}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 {
-  "_comment": "SIFT1M. Download the TEXMEX corpus (sift.tar.gz) and point these paths at the extracted .fvecs/.ivecs. Full 1M in pure Python is slow; start with base_limit for a subset and recompute gt automatically (loader drops shipped gt when base is truncated).",
   "dataset": {
     "name": "sift1m",
     "base_path": "data/sift/sift_base.fvecs",

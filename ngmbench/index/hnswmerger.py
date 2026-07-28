@@ -55,6 +55,7 @@ _RE_BUILD_T = re.compile(r"\[([\d.]+)\s*s\]\s*build index")
 _RE_EF = re.compile(r"set ef\s*=\s*(\d+)")
 _RE_QT = re.compile(r"pure query time:\s*([\d.]+)\s*s\]\s*ef=(\d+)")
 _RE_RECALL = re.compile(r"R@\d+\s*=\s*([\d.]+)")   # label says R@100 but value is R@k
+_RE_DS = re.compile(r"search distance calls per query\s*=\s*([\d.]+)")   # iso-quality metric d_s
 
 
 def parse_builds(stdout: str) -> Dict:
@@ -89,11 +90,15 @@ def parse_exps(stdout: str, expect_method: Optional[str] = None) -> Dict:
     for line in stdout.splitlines():
         m = _RE_EF.search(line)
         if m:
-            cur_ef = int(m.group(1)); curve.setdefault(cur_ef, {"qt": [], "rec": []})
+            cur_ef = int(m.group(1)); curve.setdefault(cur_ef, {"qt": [], "rec": [], "ds": []})
             continue
         q = _RE_QT.search(line)
         if q:
-            curve.setdefault(int(q.group(2)), {"qt": [], "rec": []})["qt"].append(float(q.group(1)))
+            curve.setdefault(int(q.group(2)), {"qt": [], "rec": [], "ds": []})["qt"].append(float(q.group(1)))
+            continue
+        d = _RE_DS.search(line)
+        if d and cur_ef is not None:
+            curve[cur_ef]["ds"].append(float(d.group(1)))
             continue
         r = _RE_RECALL.search(line)
         if r and cur_ef is not None:
@@ -101,7 +106,8 @@ def parse_exps(stdout: str, expect_method: Optional[str] = None) -> Dict:
     recall_curve = [
         {"ef": ef,
          "recall": float(np.mean(v["rec"])) if v["rec"] else None,
-         "query_seconds": float(np.mean(v["qt"])) if v["qt"] else None}
+         "query_seconds": float(np.mean(v["qt"])) if v["qt"] else None,
+         "d_s": float(np.mean(v["ds"])) if v["ds"] else None}
         for ef, v in sorted(curve.items())
     ]
     return {
@@ -130,6 +136,22 @@ class Paths:
     groundtruth: str         # sift_groundtruth.ivecs
     workdir: str             # scratch dir for indexes + configs
 
+    def __post_init__(self):
+        # _run executes the binaries with cwd=dirname(binary), i.e. inside the
+        # HNSWMerger tree - NOT the project root. Any relative path from a config
+        # would therefore be resolved against the wrong repo. Normalise everything
+        # here, against the caller's cwd, so configs may use either form.
+        for f in ("builds_bin", "exps_bin", "base", "query", "groundtruth", "workdir"):
+            v = getattr(self, f)
+            if v:
+                setattr(self, f, os.path.abspath(os.path.expanduser(v)))
+        for f in ("base", "query", "groundtruth"):
+            v = getattr(self, f)
+            if not os.path.exists(v):
+                raise FileNotFoundError(
+                    f"Paths.{f} does not exist: {v}\n"
+                    f"  (resolved from the config against cwd={os.getcwd()})")
+
 
 @dataclass
 class CppParams:
@@ -141,6 +163,35 @@ class CppParams:
     kk: int = 100
     nq: int = 10000
     efs_array: List[int] = field(default_factory=lambda: [10, 50, 100, 200])
+    thread: int = 1                  # drives OMP_NUM_THREADS *and* the cfg thread key
+    # merge knobs. NGM uses search_ef; IGTM uses all five;
+    # CGTM's signature has NO next_step_ef; SIGM uses merge_ef_construction.
+    jump_ef: int = 40
+    local_ef: int = 10
+    next_step_k: int = 6
+    next_step_ef: int = 6
+    search_M: int = 40
+    search_ef: int = 40
+    merge_ef_construction: int = -1  # -1 = inherit from the loaded index
+    merge_lambda: int = 4            # HNSWMerger (TWO_MERGE) forward-search width;
+                                     # paper default 4, keep < 10, never above M
+
+    def merge_kv(self) -> dict:
+        """cfg keys for the merge/insert phase. Harmless for algos that ignore them."""
+        return {"jump_ef": self.jump_ef, "local_ef": self.local_ef,
+                "next_step_k": self.next_step_k, "next_step_ef": self.next_step_ef,
+                "search_M": self.search_M, "search_ef": self.search_ef,
+                "merge_ef_construction": self.merge_ef_construction,
+                "lambda": self.merge_lambda,
+                "thread": self.thread}
+
+    def merge_id(self) -> dict:
+        """Identity of this parameter point — goes into run_key and the row."""
+        return {"jump_ef": self.jump_ef, "local_ef": self.local_ef,
+                "next_step_k": self.next_step_k, "next_step_ef": self.next_step_ef,
+                "search_M": self.search_M, "search_ef": self.search_ef,
+                "merge_ef_construction": self.merge_ef_construction,
+                "merge_lambda": self.merge_lambda}
 
 
 # --------------------------------------------------------------------------- #
@@ -154,8 +205,9 @@ class HNSWMergerRunner:
         os.makedirs(paths.workdir, exist_ok=True)
         paths.workdir = os.path.abspath(paths.workdir)   # binaries run with cwd=binary dir
         self.env = dict(os.environ)
-        if env_threads:
-            self.env["OMP_NUM_THREADS"] = str(env_threads)
+        threads = env_threads or getattr(params, "thread", None)
+        if threads:
+            self.env["OMP_NUM_THREADS"] = str(threads)
 
     def _run(self, binary: str, cfg_path: str) -> str:
         r = subprocess.run([binary, os.path.abspath(cfg_path)],
@@ -166,12 +218,16 @@ class HNSWMergerRunner:
         return r.stdout
 
     def build_leaf(self, lrange: int, rrange: int) -> Tuple[str, Dict]:
-        idx = os.path.join(self.p.workdir, f"leaf_{lrange}_{rrange}.hnsw")
+        # M/efc MUST be in the cache key: without them an ef_construction or M
+        # sweep silently reuses leaves built at different parameters, and their
+        # .meta.json feeds stale build_calc into every row at that partition count.
+        tag = f"_M{self.cp.M}_efc{self.cp.ef_construction}"
+        idx = os.path.join(self.p.workdir, f"leaf_{lrange}_{rrange}{tag}.hnsw")
         meta = idx + ".meta.json"
         if os.path.exists(idx) and os.path.exists(meta):
             with open(meta) as f:                      # carry forward the real counts
                 return idx, {**json.load(f), "cached": True}
-        cfg = os.path.join(self.p.workdir, f"build_{lrange}_{rrange}.cfg")
+        cfg = os.path.join(self.p.workdir, f"build_{lrange}_{rrange}{tag}.cfg")
         _write_kv(cfg, {
             "dim": self.cp.dim, "max_elements": rrange - lrange, "nb": self.cp.nb,
             "M": self.cp.M, "ef_construction": self.cp.ef_construction,
@@ -197,6 +253,7 @@ class HNSWMergerRunner:
             "groundtruth_filepath": self.p.groundtruth,
             "index_path": idx, "save_path": self.p.workdir,
             "efs_array": ", ".join(str(e) for e in self.cp.efs_array),
+            **self.cp.merge_kv(),
         })
         return parse_exps(self._run(self.p.exps_bin, cfg))
 
@@ -214,6 +271,7 @@ class HNSWMergerRunner:
             "groundtruth_filepath": self.p.groundtruth,
             "index_path": f"{idx_a},{idx_b}", "save_path": save_dir,
             "efs_array": ", ".join(str(e) for e in efs),
+            **self.cp.merge_kv(),
         })
         out = parse_exps(self._run(self.p.exps_bin, cfg), expect_method=method)
         # ./exps saves to save_dir/<method>_<workload>.hnsw (fixed name) -> rename unique
@@ -221,11 +279,26 @@ class HNSWMergerRunner:
         merged = os.path.join(self.p.workdir, f"merged_{uuid.uuid4().hex[:8]}.hnsw")
         if os.path.exists(produced):
             shutil.move(produced, merged)
+            # opt-in: also keep a self-describing copy for graph_structure analysis.
+            # Set NGMBENCH_DUMP_DIR to a directory; filename encodes method + params,
+            # so no uuid reverse-engineering is needed later.
+            dump_dir = os.environ.get("NGMBENCH_DUMP_DIR")
+            if dump_dir:
+                os.makedirs(dump_dir, exist_ok=True)
+                pid = self.cp.merge_id()
+                tag = ",".join(f"{k}{v}" for k, v in sorted(pid.items()) if v != -1) or "default"
+                safe = tag.replace(" ", "")
+                name = f"{method}_{self.workload}_M{self.cp.M}_efc{self.cp.ef_construction}_{safe}.hnsw"
+                shutil.copy2(merged, os.path.join(dump_dir, name))
         return merged, out
 
     def _saved_index_name(self, method: str) -> str:
-        stem = {"NGM": "ngm", "IGTM": "igtm", "CGTM": "cgtm", "ES": "es",
-                "TWO_MERGE": "two_merge"}.get(method, method.lower())
+        # C++ save names per branch (experiment.cpp): ngm_/igtm_/cgtm_/es_ match
+        # the stem, but TWO_MERGE (HNSWMerger) writes the generic "merged-index_".
+        if method == "TWO_MERGE":
+            return os.path.join(self.p.workdir, f"merged-index_{self.workload}.hnsw")
+        stem = {"NGM": "ngm", "IGTM": "igtm", "CGTM": "cgtm", "ES": "es"}.get(
+            method, method.lower())
         return os.path.join(self.p.workdir, f"{stem}_{self.workload}.hnsw")
 
     def divide_and_conquer(self, leaves: List[str], method: str, order: str,
@@ -269,6 +342,26 @@ class HNSWMergerRunner:
 
         return {"root": root, "merge_calc": merge_calc,
                 "merge_seconds": merge_seconds, "recall_curve": final_curve}
+    
+    def sigm_insert(self, leaf0, lrange, rrange, total_n):
+        """SIGM merge step: load leaf0 (resized to total_n) and insert base
+        points [lrange, rrange) into it. Requires the experiment.cpp patch."""
+        cfg = os.path.join(self.p.workdir, f"sigm_{uuid.uuid4().hex[:8]}.cfg")
+        _write_kv(cfg, {
+            "workload_type": self.workload, "merge_method": "INSERT",
+            "dim": self.cp.dim, "max_elements": total_n, "nb": total_n,
+            "M": self.cp.M, "ef_construction": self.cp.ef_construction,
+            "k": self.cp.k, "kk": self.cp.kk, "nq": self.cp.nq,
+            "iterations": 1, "rerun": "true", "save_index": "false",
+            "base_filepath": self.p.base, "query_filepath": self.p.query,
+            "groundtruth_filepath": self.p.groundtruth,
+            "index_path": leaf0,               # single index, not "a,b"
+            "lrange": lrange, "rrange": rrange,
+            "save_path": self.p.workdir,
+            "efs_array": ", ".join(str(e) for e in self.cp.efs_array),
+            **self.cp.merge_kv(),
+        })
+        return parse_exps(self._run(self.p.exps_bin, cfg), expect_method="INSERT")
 
 
 def contiguous_partitions(n: int, n_parts: int) -> List[Tuple[int, int]]:
@@ -303,7 +396,15 @@ def run_hnswmerger(algo: str, n_parts: int, order: str, paths: Paths,
             dc["recall_curve"] = None   # binary may not support single-index query for this method
             print(f"  (query-only recall for {algo}/n_parts=1 unavailable: {e})")
     else:
-        dc = runner.divide_and_conquer(leaves, method, order, total_n=params.nb)
+        if algo == "SIGM":
+            first_hi = contiguous_partitions(params.nb, n_parts)[0][1]   # reuse the loop's boundary
+            out = runner.sigm_insert(leaves[0], lrange=first_hi,
+                                     rrange=params.nb, total_n=params.nb)
+            dc = {"merge_calc": out["merge_calc"] or 0,
+                  "merge_seconds": out["merge_seconds"] or 0.0,
+                  "recall_curve": None}
+        else:
+            dc = runner.divide_and_conquer(leaves, method, order, total_n=params.nb)
 
     headline = None
     if dc["recall_curve"]:

@@ -10,6 +10,14 @@ PNG+PDF figures plus a summary CSV. Corrections (see README "data hazards"):
     build cost; the rest log build_calc=0. We fill each row's build_calc from the
     (single) non-zero value at its partition count, and recompute total_calc.
     (Newer runs carry this forward via a sidecar and won't need imputing.)
+  * SIGM build charging — SIGM (Simple Insertion Graph Merge, the rebuild
+    baseline) only builds leaf 0 and re-inserts the rest, so its own build_calc
+    is not the shared P-leaf build. For a same-build TOTAL comparison we charge
+    SIGM the shared P-leaf build (like the merges); the honest alternative
+    (leaf 0 only, ~= monolithic INSERT) would make SIGM *cheaper* on total, which
+    is why the reviewer's "merges beat rebuild" claim is read off merge_calc, not
+    total_calc. SIGM/INSERT/REBUILD are excluded from the shared-build source so
+    they cannot pollute it.
   * TWO_MERGE merge_calc=0 — its merge isn't routed through the distance counter,
     so it's dropped from distance-count plots (kept for time/recall).
   * INSERT/baseline recall may be null on older runs (no query test on the
@@ -39,10 +47,33 @@ def nq_for(row):
     return row.get("nq") or NQ_BY_DATASET.get(row.get("dataset"), 10000)
 
 
-MERGE_ALGOS = ["NGM", "IGTM", "CGTM"]
+MERGE_ALGOS = ["SIGM", "NGM", "IGTM", "CGTM", "TWO_MERGE"]
+# TWO_MERGE is the SIGMOD'26 HNSW-Merger algorithm (experiment.cpp calls
+# hnswlib::HNSWMerger<float>(a, b, &space, lambda)); display it under its real name.
+DISPLAY = {"TWO_MERGE": "HNSWMerger", "SIGM": "SIGM", "INSERT": "Rebuild"}
+
+
+def disp(algo: str) -> str:
+    return DISPLAY.get(algo, algo)
+# algos that build all P leaves (so their build_calc is the shared per-partition
+# build cost). SIGM (leaf 0 only) and INSERT/REBUILD (monolithic) are NOT here.
+TRUE_MERGE = {"NGM", "IGTM", "CGTM", "ES", "TWO_MERGE"}
 COLORS = {"NGM": "#d1495b", "IGTM": "#2e86de", "CGTM": "#16a085",
           "ES": "#e67e22", "TWO_MERGE": "#8e44ad", "INSERT": "#7f8c8d",
-          "SIGM": "#7f8c8d", "NNDescent": "#27ae60"}
+          "SIGM": "#34495e", "NNDescent": "#27ae60"}   # SIGM slate: distinct from NGM red and Rebuild grey
+BUILD_GRAY = "#d5d8dc"
+
+
+def ds_display(ds_key):
+    """Dataset KEY stays bigann* (cache/dedup safety); TITLES read 'SIFT N (BIGANN)'.
+    ANN_SIFT1M keeps its own name - it is a different collection, not a prefix."""
+    import re
+    m = re.match(r"bigann(\d+)([km]?)$", (ds_key or "").lower())
+    if m:
+        return f"SIFT {m.group(1)}{m.group(2).upper()} (BIGANN)"
+    return (ds_key or "").upper()
+CANON_RECALL_FLOOR = 0.90   # bar charts pick the cheapest merge above this recall
+ISO_TARGETS = [0.90, 0.95]  # recall levels for the iso-quality scatter
 plt.rcParams.update({
     "figure.dpi": 120, "savefig.dpi": 160, "font.size": 11,
     "axes.grid": True, "grid.alpha": 0.25, "axes.axisbelow": True,
@@ -66,20 +97,31 @@ def load(paths):
     return list(by_key.values())
 
 
+def _bkey(r):
+    """Build-cost group: leaves depend on the build parameters, not just the
+    partition count. Without M/ef_construction here, an efc sweep makes SIGM
+    inherit another group's build_calc and its total_calc becomes nonsense."""
+    return (r.get("dataset"), r.get("n_parts"), r.get("m"), r.get("ef_construction"))
+
+
 def correct(rows):
-    # impute build_calc and build_seconds per (dataset, n_parts) for hnswmerger rows
+    # shared P-leaf build/seconds per (dataset, n_parts), sourced ONLY from the
+    # true merge algos so SIGM/INSERT/REBUILD can't overwrite it.
     build_by, secs_by = {}, {}
     for r in rows:
-        if r.get("builder") == "hnswmerger" and (r.get("build_calc") or 0) > 0:
-            build_by[(r.get("dataset"), r.get("n_parts"))] = r["build_calc"]
-            secs_by[(r.get("dataset"), r.get("n_parts"))] = r.get("build_seconds") or 0
+        if (r.get("builder") == "hnswmerger" and r.get("algo") in TRUE_MERGE
+                and (r.get("build_calc") or 0) > 0):
+            build_by[_bkey(r)] = r["build_calc"]
+            secs_by[_bkey(r)] = r.get("build_seconds") or 0
     for r in rows:
         if r.get("builder") == "hnswmerger":
-            key = (r.get("dataset"), r.get("n_parts"))
-            if not (r.get("build_calc") or 0):
-                r["build_calc"] = build_by.get(key, 0)
-            if not (r.get("build_seconds") or 0):
-                r["build_seconds"] = secs_by.get(key, 0)
+            key = _bkey(r)
+            # SIGM: force the shared P-leaf build (same-build total comparison).
+            # Others: impute only when the build wasn't recorded (leaf reuse -> 0).
+            if r.get("algo") == "SIGM" or not (r.get("build_calc") or 0):
+                if build_by.get(key):
+                    r["build_calc"] = build_by[key]
+                    r["build_seconds"] = secs_by.get(key, r.get("build_seconds") or 0)
         bc, mc = r.get("build_calc") or 0, r.get("merge_calc") or 0
         r["total_calc"] = bc + mc
         # TWO_MERGE has no usable distance count
@@ -98,6 +140,310 @@ def _save(fig, out, name):
     print(f"  wrote {name}.png / .pdf")
 
 
+# Which knobs each algorithm actually consumes. rec["params"] stores the full
+# resolved set, so without this filter every row shows every knob - INSERT
+# displaying "j40,l10,lam4,nse6,nsk6,sM40,sef40" despite reading none of them.
+# Mirrors the C++ signatures in baseline2.h (note CGTM has no next_step_ef).
+RELEVANT_PARAMS = {
+    "NGM": {"search_ef"},
+    "IGTM": {"jump_ef", "local_ef", "next_step_k", "next_step_ef", "search_M"},
+    "CGTM": {"jump_ef", "local_ef", "next_step_k", "search_M"},
+    "TWO_MERGE": {"merge_lambda"},
+    "SIGM": {"merge_ef_construction"},
+    "INSERT": set(), "REBUILD": set(), "ES": set(),
+}
+
+
+def _pid(r) -> str:
+    """Short label for a parameter point; '' for a default/unswept row."""
+    mp = r.get("params") or {}
+    short = {"jump_ef": "j", "local_ef": "l", "next_step_k": "nsk",
+             "next_step_ef": "nse", "search_M": "sM", "search_ef": "sef",
+             "merge_ef_construction": "sigm_efc", "merge_lambda": "lam",
+             "ef_construction": "efc", "M": "M"}
+    keep = RELEVANT_PARAMS.get(r.get("algo"))
+    if keep is not None:
+        mp = {k: v for k, v in mp.items() if k in keep}
+    parts = [f"{short.get(k, k)}{v}" for k, v in sorted(mp.items()) if v != -1]
+    # build parameters live on the row itself, not in params
+    if r.get("ef_construction") is not None:
+        parts.insert(0, f"efc{r['ef_construction']}")
+    if r.get("m") is not None:
+        parts.insert(0, f"M{r['m']}")
+    return ",".join(parts)
+
+
+def _ds_at_recall(r, target):
+    """Interpolate search distance computations per query at a target recall.
+
+    Returns None if the row's curve never reaches `target` — a config that
+    cannot hit the target quality has no iso-quality point and must not be
+    silently plotted at its best-effort value.
+    """
+    cur = [(c.get("recall"), c.get("d_s")) for c in (r.get("recall_curve") or [])
+           if c.get("recall") is not None and c.get("d_s") is not None]
+    if len(cur) < 2:
+        return None
+    cur.sort()
+    recs = [c[0] for c in cur]
+    dss = [c[1] for c in cur]
+    if target < recs[0] or target > recs[-1]:
+        return None
+    import bisect
+    i = bisect.bisect_left(recs, target)
+    if i == 0:
+        return dss[0]
+    r0, r1, d0, d1 = recs[i - 1], recs[i], dss[i - 1], dss[i]
+    if r1 == r0:
+        return d1
+    return d0 + (d1 - d0) * (target - r0) / (r1 - r0)
+
+
+def fig_iso_quality(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
+    """Merge cost at MATCHED search quality — the comparison the paper's table makes.
+
+    x = search distance computations per query (d_s) interpolated at `target`
+    recall; y = merge-phase distance computations. A config that merges cheaply
+    by producing a worse graph moves RIGHT, so it cannot masquerade as a win.
+    Rows that never reach `target` are dropped rather than plotted at their best.
+    """
+    pts = []
+    for r in rows:
+        if r.get("builder") != "hnswmerger" or r.get("n_parts") != n_parts:
+            continue
+        if r.get("algo") not in MERGE_ALGOS and r.get("algo") not in TRUE_MERGE:
+            continue
+        d_s = _ds_at_recall(r, target)
+        mc = r.get("merge_calc")
+        if d_s is None or not mc:
+            continue
+        lam = (r.get("params") or {}).get("merge_lambda")
+        pts.append((r["algo"], _pid(r), d_s, mc / 1e9, lam))
+    if not pts:
+        print(f"  (skip iso_quality: no rows reach recall {target} with d_s)"); return
+    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+    seen = set()
+    for algo, pid, d_s, mc, lam in pts:
+        ax.scatter(d_s, mc, s=90, color=COLORS.get(algo, "#555"), zorder=3,
+                   edgecolor="white", linewidth=0.8,
+                   label=disp(algo) if algo not in seen else None)
+        seen.add(algo)
+        # annotate HNSWMerger points with their lambda - that dial is the point
+        # of this chart; other strategies show a single canonical config.
+        if algo == "TWO_MERGE" and lam is not None:
+            ax.annotate(f"\u03bb{lam}", (d_s, mc), textcoords="offset points",
+                        xytext=(6, 4), fontsize=7.5, color=COLORS["TWO_MERGE"])
+    ax.set_xlabel(f"search distance computations / query at recall@10 = {target}")
+    ax.set_ylabel("merge-phase distance computations  (billions)")
+    ax.set_title(f"Merge cost at matched search quality, {n_parts} partitions ({ds})")
+    ax.legend(title="algorithm", fontsize=9)
+    _save(fig, out, f"iso_quality_r{int(target*100)}")
+
+
+def _row(rows, algo, p):
+    cand = [r for r in rows if r.get("algo") == algo and r.get("n_parts") == p
+            and r.get("builder") == "hnswmerger"]
+    if not cand:
+        return None
+    # With a parameter sweep there are several rows per (algo, n_parts). The bar
+    # charts need one canonical point: the cheapest merge among rows that still
+    # reach the quality floor. Rows with no recall are kept only as a fallback so
+    # SIGM (recall is null on the INSERT path) does not vanish from the charts.
+    ok = [r for r in cand if (r.get("recall@10") or 0) >= CANON_RECALL_FLOOR]
+    pool = ok or cand
+    return min(pool, key=lambda r: r.get("merge_calc") or float("inf"))
+
+
+def _shared_build_g(rows, p):
+    """Shared P-leaf build (billions) at partition count p, from a true-merge row."""
+    v = next((r.get("build_calc") for r in rows if r.get("builder") == "hnswmerger"
+              and r.get("n_parts") == p and r.get("algo") in TRUE_MERGE
+              and (r.get("build_calc") or 0) > 0), 0) or 0
+    return v / 1e9
+
+
+# ---- merge-STRATEGY view (SIGMOD nomenclature) -----------------------------
+# Every method is one merge strategy with a single cost: Rebuild (=INSERT, full
+# from-scratch build), SIGM (insertion seeded from one index), and the traversal
+# merges NGM/IGTM/CGTM/HNSWMerger. On the distance axis:
+#   Rebuild cost = INSERT total_calc (build from scratch, no separate merge)
+#   SIGM cost    = its merge_calc (insertion of the other half)
+#   others       = their merge_calc
+# Build/merge are NOT split here - for Rebuild they are not separable, which is
+# the whole point of the strategy framing.
+STRATEGY_ORDER = ["TWO_MERGE", "IGTM", "CGTM", "NGM", "SIGM", "INSERT"]
+STRATEGY_LABEL = {"TWO_MERGE": "HNSWMerger", "IGTM": "IGTM", "CGTM": "CGTM",
+                  "NGM": "NGM", "SIGM": "SIGM", "INSERT": "Rebuild"}
+# canonical config shown for each strategy (the iso-quality winner); baked into
+# captions so the comparison charts need no per-point knob labels.
+CANON_CONFIG = {"TWO_MERGE": "\u03bb=4", "IGTM": "j5,l7", "CGTM": "j15,l5",
+                "NGM": "sef10", "SIGM": "efc=200", "INSERT": "\u2014"}
+
+def _canon_caption(algos):
+    parts = [f"{STRATEGY_LABEL[a]} {CANON_CONFIG[a]}" for a in algos
+             if a in CANON_CONFIG and CANON_CONFIG[a] != "\u2014"]
+    return "config: " + "; ".join(parts)
+
+
+def _strategy_cost(rows, algo, n_parts=2):
+    """Single per-strategy cost on the distance axis, cheapest config for merges."""
+    if algo == "INSERT":
+        r = next((r for r in rows if r.get("algo") == "INSERT"
+                  and r.get("builder") == "hnswmerger"), None)
+        return (r.get("total_calc") if r else None)
+    cands = [r.get("merge_calc") for r in rows
+             if r.get("algo") == algo and r.get("n_parts") == n_parts
+             and r.get("builder") == "hnswmerger" and r.get("merge_calc")]
+    return min(cands) if cands else None
+
+
+def _scale_of(ds_name):
+    """Extract N from a dataset name like bigann10k / bigann1m / bigann10m."""
+    import re
+    m = re.search(r"(\d+)\s*([km]?)$", (ds_name or "").lower())
+    if not m:
+        return None
+    v = int(m.group(1)); u = m.group(2)
+    return v * {"k": 1_000, "m": 1_000_000, "": 1}[u]
+
+
+def fig_merge_strategies_grid(all_rows, out):
+    """SIGMOD Fig.3-style small-multiples: one merge-cost bar panel per scale,
+    Rebuild included as a strategy. The erosion of the merge advantage shows as
+    the gap between Rebuild and the merges narrowing panel to panel - no slope
+    fit, no exponent to misread, matching the reference paper's nomenclature."""
+    by_scale = {}
+    for r in all_rows:
+        N = _scale_of(r.get("dataset"))
+        if N and r.get("builder") == "hnswmerger":
+            by_scale.setdefault(N, []).append(r)
+    scales = sorted(by_scale)
+    if not scales:
+        print("  (skip merge_strategies_grid: no scale data)"); return
+    ncol = len(scales)
+    fig, axes = plt.subplots(1, ncol, figsize=(3.4 * ncol, 4.2), squeeze=False)
+    for col, N in enumerate(scales):
+        ax = axes[0][col]
+        rows = by_scale[N]
+        present = [(a, _strategy_cost(rows, a, 2)) for a in STRATEGY_ORDER]
+        present = [(a, c) for a, c in present if c]
+        present.sort(key=lambda kv: kv[1])
+        vals = [c / 1e9 for _, c in present]
+        cols = [COLORS.get(a, "#555") for a, _ in present]
+        ax.bar(range(len(vals)), vals, color=cols, edgecolor="white", linewidth=0.5)
+        reb = next((c for a, c in present if a == "INSERT"), None)
+        for i, (a, c) in enumerate(present):
+            if reb and a != "INSERT":
+                ax.text(i, vals[i], f"{reb/c:.0f}\u00d7", ha="center", va="bottom", fontsize=7)
+        ax.set_xticks(range(len(present)))
+        ax.set_xticklabels([STRATEGY_LABEL[a] for a, _ in present], rotation=90, fontsize=7)
+        ax.set_title(ds_display(f"bigann{N//1000000}m" if N >= 1_000_000
+                                else f"bigann{N//1000}k"), fontsize=9)
+        if col == 0:
+            ax.set_ylabel("merge distance computations (billions)")
+    fig.suptitle("Merge cost by strategy across scale  (\u00d7 = speedup vs Rebuild)",
+                 fontsize=11)
+    _save(fig, out, "merge_strategies_grid")
+
+
+def fig_scale_trend(all_rows, out):
+    """Per-strategy merge cost vs N (log-log), one line per strategy. This is the
+    four-decade result and it needs no build/total split - merge cost is merge
+    cost at every scale. Rebuild included as the top reference line."""
+    by_scale = {}
+    for r in all_rows:
+        N = _scale_of(r.get("dataset"))
+        if N and r.get("builder") == "hnswmerger":
+            by_scale.setdefault(N, []).append(r)
+    scales = sorted(by_scale)
+    if len(scales) < 2:
+        print("  (skip scale_trend: need >=2 scales)"); return
+    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+    for algo in STRATEGY_ORDER:
+        xs, ys = [], []
+        for N in scales:
+            c = _strategy_cost(by_scale[N], algo, n_parts=2)
+            if c:
+                xs.append(N); ys.append(c / 1e9)
+        if len(xs) >= 2:
+            ax.plot(xs, ys, "o-", color=COLORS.get(algo, "#555"),
+                    label=STRATEGY_LABEL[algo], linewidth=1.8)
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ax.set_xlabel("dataset size N  (log)")
+    ax.set_ylabel("merge distance computations, billions  (log)")
+    ax.set_title("Merge cost by strategy across scale")
+    ax.legend(title="strategy", fontsize=9)
+    shown = [a for a in STRATEGY_ORDER if any(_strategy_cost(v, a, 2)
+             for v in by_scale.values())]
+    ax.text(0.5, -0.16, _canon_caption(shown), transform=ax.transAxes,
+            ha="center", fontsize=7.5, color="#666")
+    _save(fig, out, "scale_trend")
+
+
+def fig_param_sweep(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
+    """Knob-space charts for the strategies with enough sampling to warrant one.
+    Only NGM (search_ef, 3 points) qualifies; HNSWMerger's lambda dial lives in
+    fig_iso_quality, and IGTM/CGTM were sampled too sparsely (tuned-vs-default,
+    stated in caption) to draw a trend through."""
+    ngm = [r for r in rows if r.get("algo") == "NGM" and r.get("n_parts") == n_parts
+           and r.get("builder") == "hnswmerger" and r.get("merge_calc")]
+    def sef(r):
+        return (r.get("params") or {}).get("search_ef")
+    ngm = [r for r in ngm if sef(r) is not None]
+    if len(ngm) < 2:
+        print("  (skip param_sweep: NGM search_ef has <2 points)"); return
+    ngm.sort(key=sef)
+    xs = [sef(r) for r in ngm]
+    cost = [r["merge_calc"] / 1e9 for r in ngm]
+    ds = [_ds_at_recall(r, target) for r in ngm]
+
+    fig, axc = plt.subplots(figsize=(6.8, 4.4))
+    axc.plot(xs, cost, "o-", color=COLORS["NGM"], label="merge cost")
+    axc.set_xlabel("NGM search_ef")
+    axc.set_ylabel("merge distance computations (billions)", color=COLORS["NGM"])
+    axc.tick_params(axis="y", labelcolor=COLORS["NGM"])
+    axc.set_xticks(xs)
+    if any(v is not None for v in ds):
+        axd = axc.twinx()
+        axd.plot(xs, ds, "s--", color="#2c3e50", label=f"d_s @ recall {target}")
+        axd.set_ylabel(f"search dist/query @ recall {target}", color="#2c3e50")
+        axd.tick_params(axis="y", labelcolor="#2c3e50")
+        axd.spines["top"].set_visible(False)
+    axc.set_title(f"NGM: cost and search quality vs search_ef ({ds})")
+    _save(fig, out, "param_sweep_ngm")
+
+
+def fig_merge_strategies(rows, out, ds="SIFT1M", n_parts=2):
+    """One bar per merge strategy - Rebuild and SIGM promoted to first-class
+    strategies alongside the traversal merges (SIGMOD Fig.3 nomenclature). Single
+    cost axis; no build/merge split."""
+    present = [(a, _strategy_cost(rows, a, n_parts)) for a in STRATEGY_ORDER]
+    present = [(a, c) for a, c in present if c]
+    if len(present) < 2:
+        print("  (skip merge_strategies: <2 strategies)"); return
+    present.sort(key=lambda kv: kv[1])
+    labels = [STRATEGY_LABEL[a] for a, _ in present]
+    vals = [c / 1e9 for _, c in present]
+    cols = [COLORS.get(a, "#555") for a, _ in present]
+    fig, ax = plt.subplots(figsize=(7.4, 4.4))
+    bars = ax.bar(range(len(vals)), vals, color=cols, edgecolor="white", linewidth=0.6)
+    reb = next((c for a, c in present if a == "INSERT"), None)
+    for i, (bar, (a, c)) in enumerate(zip(bars, present)):
+        lbl = f"{vals[i]:.2f}"
+        if reb and a != "INSERT":
+            lbl += f"\n{reb/c:.1f}\u00d7"    # speedup vs Rebuild
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                lbl, ha="center", va="bottom", fontsize=8)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=15)
+    ax.set_ylabel("merge distance computations  (billions)")
+    ax.set_title(f"Merge cost by strategy ({ds}, {n_parts} partitions)")
+    ax.set_ylim(0, max(vals) * 1.15)
+    ax.text(0.5, -0.22, _canon_caption([a for a, _ in present]),
+            transform=ax.transAxes, ha="center", fontsize=7.5, color="#666")
+    _save(fig, out, "merge_strategies")
+
+
 def fig_merge_cost(rows, out, ds="SIFT1M"):
     parts = sorted({r["n_parts"] for r in rows
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
@@ -107,11 +453,12 @@ def fig_merge_cost(rows, out, ds="SIFT1M"):
         ys = []
         for p in parts:
             m = [r["merge_calc"] for r in rows if r.get("algo") == algo
-                 and r.get("n_parts") == p and r.get("builder") == "hnswmerger"]
+                 and r.get("n_parts") == p and r.get("builder") == "hnswmerger"
+                 and r.get("merge_calc") is not None]
             ys.append((m[0] / 1e9) if m else 0)
         xs = [i + ai * w for i in range(len(parts))]
-        ax.bar(xs, ys, w, label=algo, color=COLORS[algo])
-    ax.set_xticks([i + w for i in range(len(parts))])
+        ax.bar(xs, ys, w, label=disp(algo), color=COLORS[algo])
+    ax.set_xticks([i + w * (len(MERGE_ALGOS) - 1) / 2 for i in range(len(parts))])
     ax.set_xticklabels([f"{p} partitions" for p in parts])
     ax.set_ylabel("merge-phase distance computations  (billions)")
     ax.set_title(f"Merge cost by algorithm and partition count ({ds})")
@@ -128,11 +475,14 @@ def fig_partition_scaling(rows, out, ds="SIFT1M"):
                     and r.get("n_parts") == p), None) for p in parts]
         rc = [next((r.get("recall@10") for r in rows if r.get("algo") == algo
                     and r.get("n_parts") == p), None) for p in parts]
-        axc.plot(parts, mc, "o-", color=COLORS[algo], label=algo)
-        axr.plot(parts, rc, "o-", color=COLORS[algo], label=algo)
+        axc.plot(parts, mc, "o-", color=COLORS[algo], label=disp(algo))
+        # SIGM (and any baseline) has no recall curve -> skip it on the recall axis
+        if any(v is not None for v in rc):
+            axr.plot(parts, rc, "o-", color=COLORS[algo], label=disp(algo))
     # shared build cost (decreasing with partition count) on the cost panel
     bc = [next((r["build_calc"] / 1e9 for r in rows if r.get("n_parts") == p
-                and r.get("builder") == "hnswmerger" and (r.get("build_calc") or 0) > 0), None)
+                and r.get("builder") == "hnswmerger" and r.get("algo") in TRUE_MERGE
+                and (r.get("build_calc") or 0) > 0), None)
           for p in parts]
     axc.plot(parts, bc, "k--", marker="s", label="build (shared)", alpha=0.6)
     axc.set_xticks(parts); axc.set_xlabel("partitions")
@@ -175,68 +525,55 @@ def fig_recall_vs_qps(rows, out, ds="SIFT1M", n_parts=2):
     _save(fig, out, "recall_vs_qps")
 
 
-def fig_construction_time(rows, out, ds="SIFT1M", n_parts=2):
-    fig, ax = plt.subplots(figsize=(8, 4.2))
-    sel = [r for r in rows if (r.get("builder") == "hnswmerger"
-           and (r.get("n_parts") == n_parts or r.get("algo") in ("INSERT", "REBUILD")))
-           or r.get("builder") == "nndescent"]
-    order = {"INSERT": 0, "NNDescent": 1, "IGTM": 2, "CGTM": 3, "ES": 4, "NGM": 5, "TWO_MERGE": 6}
-    sel.sort(key=lambda r: order.get(r["algo"], 99))
-    names = [("NN-Descent" if r["algo"] == "NNDescent" else r["algo"]) for r in sel]
-    builds = [(r.get("build_seconds") or 0) for r in sel]
-    merges = [r.get("merge_seconds") or 0 for r in sel]
-    x = range(len(sel))
-    ax.bar(x, builds, color="#bdc3c7", label="build  (shared leaves for merge; full build for INSERT / NN-Descent)")
-    ax.bar(x, merges, bottom=builds, color="#e67e22", label="merge")
-    ax.set_xticks(list(x)); ax.set_xticklabels(names, rotation=20)
-    ax.set_ylabel("construction wall-clock (s)")
-    ax.set_title(f"Construction time at {n_parts} partitions ({ds})")
-    top = max((b + m) for b, m in zip(builds, merges)) if sel else 1
-    ax.set_ylim(0, top * 1.28)
-    ax.legend(loc="upper center", ncol=1, frameon=True, fontsize=9)
-    ax.text(0.5, -0.30, "NN-Descent is Numba-Python; the merge family is C++ — wall-clock is a ballpark, not a controlled comparison.",
-            transform=ax.transAxes, ha="center", fontsize=8, color="#666")
-    _save(fig, out, "construction_time")
+def _plabel(r) -> str:
+    """Parameter label for use INSIDE one build group: drop the M/efc prefix,
+    which is constant across the panel and would just repeat in every tick."""
+    pid = _pid(r)
+    parts = [p for p in pid.split(",") if not (p.startswith("M") and p[1:].isdigit())
+             and not p.startswith("efc")]
+    return ",".join(parts)
 
 
-def fig_recall_vs_buildtime(rows, out, ds="SIFT1M", n_parts=2):
-    """Cross-method overview: total construction cost vs achieved recall@10."""
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    pts = []
-    for r in rows:
-        b = r.get("builder")
-        if b == "hnswmerger" and r.get("recall@10") is not None and (
-                r.get("n_parts") == n_parts or r.get("algo") in ("INSERT", "REBUILD")):
-            t = (r.get("build_seconds") or 0) + (r.get("merge_seconds") or 0)
-            kind = "baseline" if r["algo"] in ("INSERT", "REBUILD") else "merge"
-            pts.append((r["algo"], t, r["recall@10"], kind))
-        elif b == "nndescent" and r.get("recall@10") is not None:
-            pts.append(("NNDescent", (r.get("build_seconds") or 0), r["recall@10"], "nndescent"))
-    for algo, t, rec, kind in pts:
-        marker = {"nndescent": "D", "baseline": "s"}.get(kind, "o")
-        label = "NN-Descent" if algo == "NNDescent" else algo
-        ax.scatter(t, rec, s=110, marker=marker, color=COLORS.get(algo, "#555"), zorder=3,
-                   edgecolor="white", linewidth=0.8)
-        ax.annotate(label, (t, rec), textcoords="offset points", xytext=(7, 5), fontsize=9)
-    ax.set_xlabel("total construction wall-clock (s)")
-    ax.set_ylabel("recall@10  (best query effort)")
-    ax.set_title(f"Construction cost vs achieved recall, {n_parts} partitions ({ds})")
-    ax.text(0.5, -0.32,
-            "Caveat: merge recall is best-ef on a navigable HNSW; NN-Descent recall is best-epsilon on a flat k-NN graph "
-            "(\u2260 controlled).\nNN-Descent is Numba-Python vs C++ merge — time is a ballpark.",
-            transform=ax.transAxes, ha="center", fontsize=8, color="#666")
-    _save(fig, out, "recall_vs_buildtime")
+def fig_recall_vs_ds(rows, out, ds="SIFT1M", n_parts=2):
+    """Search quality vs search COST on the distance-computation axis: recall@10
+    against d_s (search distance computations per query). The implementation-
+    independent companion to fig_recall_vs_qps - same curves, but x is work done
+    rather than wall-clock throughput, so it is not confounded by threading or
+    the C++/Python split. NN-Descent is omitted: its search is not d_s-
+    instrumented, and it was never a controlled time comparison either."""
+    fig, ax = plt.subplots(figsize=(7, 4.6))
+    methods = [r for r in rows if r.get("builder") == "hnswmerger"
+               and r.get("n_parts") == n_parts and r.get("recall_curve")]
+    order = ["TWO_MERGE", "IGTM", "CGTM", "NGM", "ES"]
+    methods.sort(key=lambda r: order.index(r["algo"]) if r["algo"] in order else 99)
+    drawn = 0
+    for r in methods:
+        pts = [(c["d_s"], c["recall"]) for c in r["recall_curve"]
+               if c.get("d_s") and c.get("recall") is not None]
+        if not pts:
+            continue
+        xs, ys = zip(*sorted(pts))
+        ax.plot(xs, ys, "o-", color=COLORS.get(r["algo"], "#555"), label=disp(r["algo"]))
+        drawn += 1
+    if not drawn:
+        print("  (skip recall_vs_ds: no d_s curves)"); plt.close(fig); return
+    ax.set_xlabel("search distance computations / query  (d_s)")
+    ax.set_ylabel("recall@10")
+    ax.set_title(f"Search quality vs search cost at {n_parts} partitions ({ds})")
+    ax.legend(title="strategy")
+    _save(fig, out, "recall_vs_ds")
 
 
 def write_summary(rows, out):
     os.makedirs(out, exist_ok=True)
-    cols = ["builder", "algo", "n_parts", "build_calc", "merge_calc", "total_calc",
-            "build_seconds", "merge_seconds", "recall@10"]
+    cols = ["builder", "algo", "n_parts", "params_id", "build_calc", "merge_calc",
+            "total_calc", "build_seconds", "merge_seconds", "recall@10", "d_s@0.95"]
     with open(os.path.join(out, "summary.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
-        for r in sorted(rows, key=lambda r: (str(r.get("algo")), r.get("n_parts", 0))):
-            w.writerow(r)
+        for r in sorted(rows, key=lambda r: (str(r.get("algo")), r.get("n_parts", 0),
+                                             _pid(r))):
+            w.writerow({**r, "params_id": _pid(r), "d_s@0.95": _ds_at_recall(r, 0.95)})
     print("  wrote summary.csv")
 
 
@@ -256,18 +593,25 @@ def main(argv=None):
         by_ds[r.get("dataset") or "unknown"].append(r)
 
     for ds_key, ds_rows in sorted(by_ds.items()):
-        ds = ds_key.upper()
+        ds = ds_display(ds_key)
         out = os.path.join(a.out, ds_key)
         print(f"{ds_key}: {len(ds_rows)} rows -> {out}")
+        fig_merge_strategies(ds_rows, out, ds)
+        for t in ISO_TARGETS:
+            fig_iso_quality(ds_rows, out, ds, n_parts=2, target=t)
+        fig_param_sweep(ds_rows, out, ds, n_parts=2)
         fig_merge_cost(ds_rows, out, ds)
         fig_partition_scaling(ds_rows, out, ds)
         fig_recall_vs_qps(ds_rows, out, ds)
-        fig_construction_time(ds_rows, out, ds)
-        fig_recall_vs_buildtime(ds_rows, out, ds)
+        fig_recall_vs_ds(ds_rows, out, ds)
         write_summary(ds_rows, out)
         if not any(r.get("builder") == "nndescent" for r in ds_rows):
             print(f"  note: no NN-Descent rows for {ds_key} — "
                   f"run config/{ds_key}.json (nndescent) to add it.")
+
+    # cross-dataset: merge cost vs scale (all bigann* scales together)
+    fig_scale_trend(rows, os.path.join(a.out, "_scale"))
+    fig_merge_strategies_grid(rows, os.path.join(a.out, "_scale"))
 
 
 if __name__ == "__main__":
