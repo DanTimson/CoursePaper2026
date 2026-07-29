@@ -8,12 +8,18 @@ computation axis, across four decades of scale.
 
 ## Question
 
-Partitioning the data, building a sub-index per partition, and merging the
-sub-indices saves the build work that partitioning avoids — but the merge itself
-costs distance computations. Does the merge ever pay for itself, and how does the
-trade move with dataset size? The paper answers this on **distance computations**
-(language- and thread-independent), with wall-clock QPS and recall@k reported
-alongside for search quality.
+Given two HNSW indices, what is the cheapest way to produce one merged index —
+and how does the answer change with dataset size? Full rebuild, sequential
+insertion, and several graph-merge algorithms are all *merge strategies* for this
+task; the paper compares their **merge cost** in distance computations (language-
+and thread-independent), alongside the **search quality** (d_s at matched recall,
+and wall-clock QPS) of the index each produces, from 10⁴ to 10⁷ vectors.
+
+The comparison is on the merge operation itself, not on total from-scratch
+construction cost: partitioning's build saving is a fixed Θ(N log P) per point
+while a merge is Θ(N log N), so no merge asymptotically undercuts a full rebuild
+on *total* cost — the interesting axis is the cost and quality of the merge
+step, where the strategies differ by more than an order of magnitude.
 
 ## Strategies compared
 
@@ -30,18 +36,18 @@ producing one index from two, by whatever means.
 ## Key findings
 
 - **Merge cost, all scales.** On the merge-cost axis, HNSW-Merger is 18–37×
-  cheaper than Rebuild and the traversal merges (IGTM/CGTM/NGM) 2–13×, at every
-  scale from 10⁴ to 10⁷ (`docs/figures/_scale/merge_strategies_grid.png`).
-- **Total construction cost erodes with N.** Counting the P-leaf build *plus* the
-  merge, the merge advantage over Rebuild shrinks monotonically with scale — the
-  partition saving is Θ(N log P) (constant per point) while the merge is
-  Θ(N log N). Only HNSW-Merger stays ahead at 10M, at break-even.
-- **ef_construction is the decisive lever.** No merge beats Rebuild on total cost
-  once ef_construction ≤ 64; the advantage exists only at the build-heavy
-  ef_construction = 200.
+  cheaper than a full rebuild and the traversal merges (IGTM/CGTM/NGM) 2–13×, at
+  every scale from 10⁴ to 10⁷. The ordering — HNSW-Merger < IGTM < CGTM ≈ NGM <
+  SIGM < Rebuild — is stable across four decades
+  (`docs/figures/_scale/merge_strategies_grid.png`,
+  `docs/figures/_scale/scale_trend.png`).
+- **Reviewer's claim confirmed.** On the merge column the traversal merges beat
+  SIGM (sequential insertion, «перестроение» in Ponomarenko's table) at every
+  scale — the point the course review turned on.
 - **Iso-quality: λ is a clean dial.** HNSW-Merger's λ trades merge cost for search
   quality (d_s at matched recall) monotonically, with diminishing returns past
-  λ = 4 (`docs/figures/bigann*/iso_quality_r95.png`).
+  λ = 4 — the basis for the default λ = 4
+  (`docs/figures/bigann*/iso_quality_r95.png`).
 - **Density is edge placement, not edge count.** At identical mean degree (~13.7),
   NGM searches ~15 % cheaper than IGTM/CGTM: its two-way full search places
   better-positioned edges. Merges never fragment connectivity.

@@ -235,7 +235,6 @@ def density_vs_ds(rows, out, target, density_csv, csv_rows, ds_name):
     _save(fig, out, "density_vs_ds")
 
 
-# ---------- 4. scale slopes ----------------------------------------------------
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
