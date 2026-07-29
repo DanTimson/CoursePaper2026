@@ -1,9 +1,0 @@
-{"NGM":  [{"search_ef":40},{"search_ef":20},{"search_ef":10}],
- "IGTM": [{"jump_ef":40,"local_ef":10,"next_step_k":6,"next_step_ef":6,"search_M":40},
-          {"jump_ef":20,"local_ef":5,"next_step_k":3,"next_step_ef":3,"search_M":3},
-          {"jump_ef":64,"local_ef":5,"next_step_k":3,"next_step_ef":3,"search_M":5},
-          {"jump_ef":5,"local_ef":7,"next_step_k":3,"next_step_ef":3,"search_M":5}],
- "CGTM": [{"jump_ef":40,"local_ef":10,"next_step_k":6,"search_M":40},
-          {"jump_ef":20,"local_ef":5,"next_step_k":3,"search_M":3},
-          {"jump_ef":15,"local_ef":5,"next_step_k":3,"search_M":5}],
- "SIGM": [{}]}
