@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Derived-quantity analyses over the merge sweep. Reads the raw per-scale JSONL
 logs (which carry `dataset`, unlike summary.csv) plus the optional structural
-density CSV, and emits four analyses + figures:
+density CSV, and emits three analyses + figures:
 
   1. lambda frontier   — HNSWMerger cost vs d_s across lambda, with marginal
                           returns (delta d_s per extra billion merge-computations)
@@ -11,9 +11,7 @@ density CSV, and emits four analyses + figures:
   3. density vs d_s      — join structural mean-degree (graph_structure.csv) to
                           each strategy's d_s@target -> does denser graph search
                           cheaper, and is any strategy sparse-but-competitive.
-  4. scale slopes        — fit log(merge_cost) ~ log(N) per strategy across scales
-                          -> empirical growth exponent, tests Theta(N log N) vs
-                          Theta(N log P) directly.
+
 
     python scripts/analyse_trends.py \
         --results results_bigann10k.jsonl results_bigann100k.jsonl \
@@ -22,7 +20,8 @@ density CSV, and emits four analyses + figures:
         --target 0.95 --out docs/figures/trends
 
 Writes lambda_frontier.png, efc_sensitivity.png (if >1 efc), density_vs_ds.png
-(if --density), scale_slopes.png, and trends.csv with every derived number.
+(if --density), and trends.csv with every derived number. Scale comparison of
+merge strategies lives in make_figures.py (merge_strategies_grid, scale_trend).
 """
 from __future__ import annotations
 
@@ -83,6 +82,15 @@ def _p(r, key, default=None):
     return (r.get("params") or {}).get(key, default)
 
 
+def _efc(r):
+    """ef_construction lives at the row top level (harness writes it there), not
+    in params/merge_id. Fall back to params, then to 200."""
+    v = r.get("ef_construction")
+    if v is None:
+        v = (r.get("params") or {}).get("ef_construction")
+    return 200 if v is None else v
+
+
 def _dss(r, target):
     """d_s@target from curve, else fall back to a stored d_s@0.95 field."""
     v = ds_at(r, target)
@@ -107,7 +115,7 @@ def lambda_frontier(rows, out, target, csv_rows, ds_name):
     for r in rows:
         if r.get("algo") != "TWO_MERGE" or r.get("n_parts") != 2:
             continue
-        if _p(r, "ef_construction", 200) != 200:
+        if _efc(r) != 200:
             continue
         lam = _p(r, "merge_lambda")
         d, mc = _dss(r, target), r.get("merge_calc")
@@ -228,67 +236,6 @@ def density_vs_ds(rows, out, target, density_csv, csv_rows, ds_name):
 
 
 # ---------- 4. scale slopes ----------------------------------------------------
-def erosion_vs_scale(rows, out, csv_rows):
-    """Merge advantage vs Rebuild at each scale, on the ONE commensurable quantity:
-    total construction distance computations (Rebuild = full build; a merge =
-    P-leaf build + combine). Advantage % = (Rebuild - strategy_total)/Rebuild.
-    Positive = cheaper than Rebuild. This is the erosion, with no growth-exponent
-    to misread as 'merge scales better'."""
-    by = {}
-    for r in rows:
-        N = scale_of(r.get("dataset"))
-        if not N or r.get("builder") != "hnswmerger" or _p(r, "ef_construction", 200) != 200:
-            continue
-        a = r.get("algo")
-        if a == "INSERT":
-            by.setdefault(N, {})["Rebuild"] = r.get("total_calc")
-        elif a == "TWO_MERGE":
-            if _p(r, "merge_lambda") != 4:      # canonical HNSWMerger
-                continue
-            by.setdefault(N, {})[a] = r.get("total_calc")
-        elif a in ("IGTM", "CGTM", "NGM", "SIGM") and r.get("n_parts") == 2:
-            cur = by.setdefault(N, {})
-            v = r.get("total_calc")
-            if v and (a not in cur or v < cur[a]):
-                cur[a] = v
-    scales = sorted(by)
-    if len(scales) < 2:
-        print("  (skip erosion_vs_scale: <2 scales)"); return
-    strategies = ["TWO_MERGE", "IGTM", "CGTM", "NGM", "SIGM"]
-    fig, ax = plt.subplots(figsize=(7.4, 4.8))
-    print("\n  merge advantage vs Rebuild on TOTAL construction cost (+ = cheaper):")
-    hdr = "    N".ljust(12) + "".join(STRAT_LABEL[s].rjust(12) for s in strategies)
-    print(hdr)
-    for N in scales:
-        reb = by[N].get("Rebuild")
-        line = f"    {N:<10,}"
-        for s in strategies:
-            v = by[N].get(s)
-            if reb and v:
-                pct = 100 * (reb - v) / reb
-                line += f"{pct:+11.2f}%"
-                csv_rows.append({"analysis": "erosion", "dataset": f"N={N}",
-                                 "x": s, "value": pct, "detail": f"total={v}"})
-            else:
-                line += "         -  "
-        print(line)
-    for s in strategies:
-        xs, ys = [], []
-        for N in scales:
-            reb, v = by[N].get("Rebuild"), by[N].get(s)
-            if reb and v:
-                xs.append(N); ys.append(100 * (reb - v) / reb)
-        if len(xs) >= 2:
-            ax.plot(xs, ys, "o-", color=COLORS.get(s, "#555"), label=STRAT_LABEL[s])
-    ax.axhline(0, color="#555", lw=1.2, ls="--", alpha=0.7)
-    ax.set_xscale("log")
-    ax.set_xlabel("N (log)")
-    ax.set_ylabel("advantage vs Rebuild on total cost  (%)")
-    ax.set_title("Merge advantage erodes with scale (crosses 0 = Rebuild wins)")
-    ax.legend(fontsize=8, title="strategy")
-    _save(fig, out, "erosion_vs_scale")
-
-
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
@@ -319,8 +266,7 @@ def main(argv=None):
     efc_sensitivity(big_rows, a.out, a.target, csv_rows, big_name)
     print("\n== 3. density vs d_s ==")
     density_vs_ds(big_rows, a.out, a.target, a.density, csv_rows, big_name)
-    print("\n== 4. erosion vs scale ==")
-    erosion_vs_scale(rows, a.out, csv_rows)
+
 
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "trends.csv"), "w", newline="") as f:

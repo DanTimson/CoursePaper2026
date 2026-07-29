@@ -3,7 +3,6 @@ vendor_repo/
 
 # experiment outputs / caches
 .ngmbench_cache*/
-results*.jsonl
 !sample_results.jsonl
 
 # datasets (download locally; large)

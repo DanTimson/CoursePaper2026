@@ -285,16 +285,39 @@ def _canon_caption(algos):
     return "config: " + "; ".join(parts)
 
 
+# canonical config per strategy: min() over a parameter sweep is WRONG - it picks
+# the lowest-effort config (e.g. SIGM merge_ef_construction=16), which lurches the
+# ordering between scales that were swept vs not. Pin the canonical config instead.
+def _is_canonical(r):
+    p = r.get("params") or {}
+    algo = r.get("algo")
+    if algo == "TWO_MERGE":
+        return p.get("merge_lambda") == 4          # HNSWMerger canonical lambda
+    if algo == "SIGM":
+        return p.get("merge_ef_construction", -1) in (-1, None)  # inherit ef
+    return True   # NGM/IGTM/CGTM: single canonical config in the grid sweep
+
+
 def _strategy_cost(rows, algo, n_parts=2):
-    """Single per-strategy cost on the distance axis, cheapest config for merges."""
+    """Single per-strategy cost on the distance axis at efc=200, canonical config."""
     if algo == "INSERT":
         r = next((r for r in rows if r.get("algo") == "INSERT"
-                  and r.get("builder") == "hnswmerger"), None)
+                  and r.get("builder") == "hnswmerger"
+                  and _efc_row(r) == 200), None)
         return (r.get("total_calc") if r else None)
     cands = [r.get("merge_calc") for r in rows
              if r.get("algo") == algo and r.get("n_parts") == n_parts
-             and r.get("builder") == "hnswmerger" and r.get("merge_calc")]
+             and r.get("builder") == "hnswmerger" and r.get("merge_calc")
+             and _efc_row(r) == 200 and _is_canonical(r)]
     return min(cands) if cands else None
+
+
+def _efc_row(r):
+    """ef_construction from the row top level (not params/merge_id), default 200."""
+    v = r.get("ef_construction")
+    if v is None:
+        v = (r.get("params") or {}).get("ef_construction")
+    return 200 if v is None else v
 
 
 def _scale_of(ds_name):
@@ -334,7 +357,9 @@ def fig_merge_strategies_grid(all_rows, out):
         reb = next((c for a, c in present if a == "INSERT"), None)
         for i, (a, c) in enumerate(present):
             if reb and a != "INSERT":
-                ax.text(i, vals[i], f"{reb/c:.0f}\u00d7", ha="center", va="bottom", fontsize=7)
+                sp = reb / c
+                txt = f"{sp:.1f}\u00d7" if sp < 10 else f"{sp:.0f}\u00d7"
+                ax.text(i, vals[i], txt, ha="center", va="bottom", fontsize=7)
         ax.set_xticks(range(len(present)))
         ax.set_xticklabels([STRATEGY_LABEL[a] for a, _ in present], rotation=90, fontsize=7)
         ax.set_title(ds_display(f"bigann{N//1000000}m" if N >= 1_000_000
@@ -431,7 +456,8 @@ def fig_merge_strategies(rows, out, ds="SIFT1M", n_parts=2):
     for i, (bar, (a, c)) in enumerate(zip(bars, present)):
         lbl = f"{vals[i]:.2f}"
         if reb and a != "INSERT":
-            lbl += f"\n{reb/c:.1f}\u00d7"    # speedup vs Rebuild
+            sp = reb / c
+            lbl += f"\n{sp:.1f}\u00d7" if sp < 10 else f"\n{sp:.0f}\u00d7"  # speedup vs Rebuild
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
                 lbl, ha="center", va="bottom", fontsize=8)
     ax.set_xticks(range(len(labels)))
