@@ -1,0 +1,7 @@
+label,path,nodes,mean_degree,median_degree,min_degree,max_degree,cap,frac_at_cap,components,largest_component_frac
+leaf,leaf.csv,50000,21.02924,21,3,32,32,0.03114,1,1.0
+INSERT,insert.csv,100000,21.44433,21,2,32,32,0.03366,1,1.0
+IGTM,igtm.csv,100000,13.70738,14,1,32,32,0.00111,1,1.0
+CGTM,cgtm.csv,100000,13.73081,14,1,32,32,0.00096,1,1.0
+NGM,ngm.csv,100000,13.75412,14,1,32,32,0.00108,1,1.0
+HNSWMerger,hnswmerger.csv,100000,22.83902,23,1,32,32,0.04178,1,1.0

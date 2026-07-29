@@ -204,7 +204,8 @@ def fig_iso_quality(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
 
     x = search distance computations per query (d_s) interpolated at `target`
     recall; y = merge-phase distance computations. A config that merges cheaply
-    by producing a worse graph moves RIGHT, so it cannot masquerade as a win.
+    by producing a worse graph moves RIGHT on the d_s axis, so a cheap-but-poor
+    merge is visibly distinguished from a genuine efficiency gain.
     Rows that never reach `target` are dropped rather than plotted at their best.
     """
     pts = []
@@ -285,9 +286,10 @@ def _canon_caption(algos):
     return "config: " + "; ".join(parts)
 
 
-# canonical config per strategy: min() over a parameter sweep is WRONG - it picks
-# the lowest-effort config (e.g. SIGM merge_ef_construction=16), which lurches the
-# ordering between scales that were swept vs not. Pin the canonical config instead.
+# Each strategy is summarized by its canonical config, not the cheapest row in a
+# parameter sweep: SIGM at merge_ef_construction=-1 (inherit), HNSW-Merger at
+# lambda=4. This keeps the per-strategy ordering consistent across scales, some of
+# which sweep a knob and some of which do not.
 def _is_canonical(r):
     p = r.get("params") or {}
     algo = r.get("algo")

@@ -1,0 +1,8 @@
+analysis,dataset,x,value,detail
+lambda_frontier,"N=10,000,000",lam1->lam4,267.090856304395,dcost=1.075B d_ds=287.2
+lambda_frontier,"N=10,000,000",lam4->lam10,196.93798308434037,dcost=1.664B d_ds=327.6
+lambda_frontier,"N=10,000,000",lam10->lam20,81.95521202150661,dcost=2.344B d_ds=192.1
+density_vs_ds,"N=10,000,000",TWO_MERGE,22.83902,d_s=2096.5
+density_vs_ds,"N=10,000,000",IGTM,13.70738,d_s=2731.9
+density_vs_ds,"N=10,000,000",CGTM,13.73081,d_s=2721.0
+density_vs_ds,"N=10,000,000",NGM,13.75412,d_s=2398.8

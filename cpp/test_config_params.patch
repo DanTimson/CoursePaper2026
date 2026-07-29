@@ -1,0 +1,25 @@
+diff --git a/HNSW-Merger/test_config.h b/HNSW-Merger/test_config.h
+index b6acf70..38fc161 100644
+--- a/HNSW-Merger/test_config.h
++++ b/HNSW-Merger/test_config.h
+@@ -63,2 +63,10 @@ struct Config {
+     float alpha = 1.05;
++    // merge-parameter knobs (Ponomarenko et al.); defaults match baseline2.h signatures
++    int jump_ef = 40;        // IGTM/CGTM
++    int local_ef = 10;       // IGTM/CGTM
++    int next_step_k = 6;     // IGTM/CGTM
++    int next_step_ef = 6;    // IGTM only (CGTM's signature has no next_step_ef)
++    int search_M = 40;       // IGTM/CGTM
++    int search_ef = 40;      // NGM (HNSWMerger_Naive)
++    int merge_ef_construction = -1;  // SIGM insertion effort; -1 = inherit from the loaded index
+     bool save_index = true;
+@@ -297,2 +305,9 @@ Config loadConfig(const std::string &filename) {
+     if (kv.count("lambda")) cfg.lambda = std::stoi(kv.at("lambda"));
++    if (kv.count("jump_ef")) cfg.jump_ef = std::stoi(kv.at("jump_ef"));
++    if (kv.count("local_ef")) cfg.local_ef = std::stoi(kv.at("local_ef"));
++    if (kv.count("next_step_k")) cfg.next_step_k = std::stoi(kv.at("next_step_k"));
++    if (kv.count("next_step_ef")) cfg.next_step_ef = std::stoi(kv.at("next_step_ef"));
++    if (kv.count("search_M")) cfg.search_M = std::stoi(kv.at("search_M"));
++    if (kv.count("search_ef")) cfg.search_ef = std::stoi(kv.at("search_ef"));
++    if (kv.count("merge_ef_construction")) cfg.merge_ef_construction = std::stoi(kv.at("merge_ef_construction"));
+     if (kv.count("alpha")) cfg.alpha = std::stof(kv.at("alpha"));

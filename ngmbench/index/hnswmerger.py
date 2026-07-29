@@ -218,9 +218,9 @@ class HNSWMergerRunner:
         return r.stdout
 
     def build_leaf(self, lrange: int, rrange: int) -> Tuple[str, Dict]:
-        # M/efc MUST be in the cache key: without them an ef_construction or M
-        # sweep silently reuses leaves built at different parameters, and their
-        # .meta.json feeds stale build_calc into every row at that partition count.
+        # M and ef_construction are part of the leaf cache key: leaves built at
+        # different build parameters are distinct artifacts, and each carries its
+        # own build_calc in the sidecar .meta.json.
         tag = f"_M{self.cp.M}_efc{self.cp.ef_construction}"
         idx = os.path.join(self.p.workdir, f"leaf_{lrange}_{rrange}{tag}.hnsw")
         meta = idx + ".meta.json"

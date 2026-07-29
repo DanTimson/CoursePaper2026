@@ -1,0 +1,107 @@
+diff --git a/HNSW-Merger/experiment.cpp b/HNSW-Merger/experiment.cpp
+index f3c175d..eb08157 100644
+--- a/HNSW-Merger/experiment.cpp
++++ b/HNSW-Merger/experiment.cpp
+@@ -106,6 +106,13 @@ void workload(const std::string &config_path) {
+     int rrange = cfg.rrange;
+     int thread = cfg.thread;
+     int lambda = cfg.lambda;
++    size_t jump_ef = (size_t)cfg.jump_ef;
++    size_t local_ef = (size_t)cfg.local_ef;
++    size_t next_step_k = (size_t)cfg.next_step_k;
++    size_t next_step_ef = (size_t)cfg.next_step_ef;
++    size_t search_M = (size_t)cfg.search_M;
++    size_t search_ef = (size_t)cfg.search_ef;
++    int merge_ef_construction = cfg.merge_ef_construction;
+     float alpha = cfg.alpha;
+     bool save_index = cfg.save_index;
+ 
+@@ -196,6 +203,10 @@ void workload(const std::string &config_path) {
+                 alg_hnsw0 = new hnswlib::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
+                 alg_hnsw0->loadIndex(index_path, &space, max_elements);   // SIGM patch: resize to full capacity so the remaining range can be inserted
+                 std::cout << "Loaded index from: " << index_path << std::endl;
++                if (merge_ef_construction > 0) {   // SIGM effort knob (Ponomarenko's SIGM_bench sweeps ef_construction)
++                    alg_hnsw0->ef_construction_ = (size_t)merge_ef_construction;
++                    printf("SIGM ef_construction = %d\n", merge_ef_construction);
++                }
+ 
+                 double t0 = elapsed();
+                 ParallelFor(lrange, rrange, thread, [&](size_t row, size_t threadId) { alg_hnsw0->addPoint((void *)(xb + dim * row), row); });
+@@ -465,7 +476,7 @@ void workload(const std::string &config_path) {
+                 double t0 = elapsed();
+                 // size_t search_ef = 20;
+                 // alg_hnsw2 = hnswlib::HNSWMerger_Naive<float>(alg_hnsw0, alg_hnsw1, &space, search_ef);
+-                alg_hnsw2 = hnswlib::HNSWMerger_Naive<float>(alg_hnsw0, alg_hnsw1, &space);
++                alg_hnsw2 = hnswlib::HNSWMerger_Naive<float>(alg_hnsw0, alg_hnsw1, &space, search_ef);
+                 printf("Total time for insertion: %.3f s\n", elapsed() - t0);
+                 printf("distance calls = %llu\n", (unsigned long long)alg_hnsw2->get_dist_call_counter());
+                 if (save_index) {
+@@ -500,7 +511,7 @@ void workload(const std::string &config_path) {
+                 // size_t next_step_ef = 3;
+                 // size_t search_M = 20;
+                 // alg_hnsw2 = hnswlib::HNSWMerger_IGTM<float>(alg_hnsw0, alg_hnsw1, &space, jump_ef, local_ef, next_step_k, next_step_ef, search_M);
+-                alg_hnsw2 = hnswlib::HNSWMerger_IGTM<float>(alg_hnsw0, alg_hnsw1, &space);
++                alg_hnsw2 = hnswlib::HNSWMerger_IGTM<float>(alg_hnsw0, alg_hnsw1, &space, jump_ef, local_ef, next_step_k, next_step_ef, search_M);
+                 printf("Total time for insertion: %.3f s\n", elapsed() - t0);
+                 printf("distance calls = %llu\n", (unsigned long long)alg_hnsw2->get_dist_call_counter());
+                 if (save_index) {
+@@ -533,7 +544,7 @@ void workload(const std::string &config_path) {
+                 // size_t local_ef = 5;
+                 // size_t next_step_k = 3;
+                 // size_t search_M = 20;
+-                alg_hnsw2 = hnswlib::HNSWMerger_CGTM<float>(alg_hnsw0, alg_hnsw1, &space);
++                alg_hnsw2 = hnswlib::HNSWMerger_CGTM<float>(alg_hnsw0, alg_hnsw1, &space, jump_ef, local_ef, next_step_k, search_M);
+                 // alg_hnsw2 = hnswlib::HNSWMerger_CGTM<float>(alg_hnsw0, alg_hnsw1, &space, jump_ef, local_ef, next_step_k, search_M);
+                 printf("Total time for insertion: %.3f s\n", elapsed() - t0);
+                 printf("distance calls = %llu\n", (unsigned long long)alg_hnsw2->get_dist_call_counter());
+@@ -564,6 +575,7 @@ void workload(const std::string &config_path) {
+         for (int iter = 0; iter < 3; iter++) {
+             double t_search = 0.0;
+             double t0 = elapsed();
++            unsigned long long dc0 = (unsigned long long)alg_hnsw0->get_dist_call_counter();   // d_s patch
+             int *I = new int[nq * k];
+             for (int i = 0; i < nq; i++) {
+                 double t1 = elapsed();
+@@ -575,7 +587,9 @@ void workload(const std::string &config_path) {
+                 }
+             }
+             double t_all = elapsed() - t0;
++            double d_s = (double)((unsigned long long)alg_hnsw0->get_dist_call_counter() - dc0) / (double)nq;   // d_s patch
+             printf("[search time: %.3f s, pure query time: %.3f s] ef=%d\n", t_all, t_search, ef_val);
++            printf("search distance calls per query = %.4f\n", d_s);   // d_s patch: iso-quality metric
+ 
+             int correct = 0;
+             for (int i = 0; i < nq; i++) {
+diff --git a/HNSW-Merger/test_config.h b/HNSW-Merger/test_config.h
+index b6acf70..38fc161 100644
+--- a/HNSW-Merger/test_config.h
++++ b/HNSW-Merger/test_config.h
+@@ -61,6 +61,14 @@ struct Config {
+     int thread = 1;
+     int lambda = 4;
+     float alpha = 1.05;
++    // merge-parameter knobs (Ponomarenko et al.); defaults match baseline2.h signatures
++    int jump_ef = 40;        // IGTM/CGTM
++    int local_ef = 10;       // IGTM/CGTM
++    int next_step_k = 6;     // IGTM/CGTM
++    int next_step_ef = 6;    // IGTM only (CGTM's signature has no next_step_ef)
++    int search_M = 40;       // IGTM/CGTM
++    int search_ef = 40;      // NGM (HNSWMerger_Naive)
++    int merge_ef_construction = -1;  // SIGM insertion effort; -1 = inherit from the loaded index
+     bool save_index = true;
+     std::string base_filepath;
+     std::string query_filepath;
+@@ -295,6 +303,13 @@ Config loadConfig(const std::string &filename) {
+     if (kv.count("rerun")) cfg.rerun = (kv.at("rerun") == "true");
+     if (kv.count("thread")) cfg.thread = std::stoi(kv.at("thread"));
+     if (kv.count("lambda")) cfg.lambda = std::stoi(kv.at("lambda"));
++    if (kv.count("jump_ef")) cfg.jump_ef = std::stoi(kv.at("jump_ef"));
++    if (kv.count("local_ef")) cfg.local_ef = std::stoi(kv.at("local_ef"));
++    if (kv.count("next_step_k")) cfg.next_step_k = std::stoi(kv.at("next_step_k"));
++    if (kv.count("next_step_ef")) cfg.next_step_ef = std::stoi(kv.at("next_step_ef"));
++    if (kv.count("search_M")) cfg.search_M = std::stoi(kv.at("search_M"));
++    if (kv.count("search_ef")) cfg.search_ef = std::stoi(kv.at("search_ef"));
++    if (kv.count("merge_ef_construction")) cfg.merge_ef_construction = std::stoi(kv.at("merge_ef_construction"));
+     if (kv.count("alpha")) cfg.alpha = std::stof(kv.at("alpha"));
+     if (kv.count("save_index")) cfg.save_index = (kv.at("save_index") == "true");
+ 

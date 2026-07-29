@@ -1,24 +1,29 @@
-# vendored upstream (re-clone via scripts/setup_vendor.sh; unlicensed upstream)
-vendor_repo/
-
-# experiment outputs / caches
-.ngmbench_cache*/
-!sample_results.jsonl
-
-# datasets (download locally; large)
+# --- datasets (download locally via scripts/get_data.sh; large) ---
 data/
 
-# python
+# --- vendored upstream C++ (clone via the note in cpp/README.md; unlicensed) ---
+vendor_repo/
+HNSWMerger/
+
+# --- experiment caches & scratch (regenerable) ---
+.hnswmerger_work*/
+.work_*/
+.ngmbench_cache*/
+*.pkl
+*.cfg
+*.out
+dumps/
+
+# --- built C++ binaries ---
+cpp/exps
+cpp/builds
+cpp/dump_graph
+*.o
+
+# --- python ---
 __pycache__/
 *.pyc
 .venv/
 venv/
 *.egg-info/
 .pytest_cache/
-
-.*work*
-*.pkl
-*.cfg
-*.out
-*.csv
-dumps/

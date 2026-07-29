@@ -1,0 +1,19 @@
+diff --git a/HNSW-Merger/experiment.cpp b/HNSW-Merger/experiment.cpp
+index 5c73de7..f3c175d 100644
+--- a/HNSW-Merger/experiment.cpp
++++ b/HNSW-Merger/experiment.cpp
+@@ -194,12 +194,13 @@ void workload(const std::string &config_path) {
+                 std::string index_path = (cfg.index_path)[0];
+                 printf("Loading index from: %s\n", index_path.c_str());
+                 alg_hnsw0 = new hnswlib::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
+-                alg_hnsw0->loadIndex(index_path, &space);
++                alg_hnsw0->loadIndex(index_path, &space, max_elements);   // SIGM patch: resize to full capacity so the remaining range can be inserted
+                 std::cout << "Loaded index from: " << index_path << std::endl;
+ 
+                 double t0 = elapsed();
+                 ParallelFor(lrange, rrange, thread, [&](size_t row, size_t threadId) { alg_hnsw0->addPoint((void *)(xb + dim * row), row); });
+                 printf("Total time for insertion: %.3f s\n", elapsed() - t0);
++                printf("distance calls = %llu\n", (unsigned long long)alg_hnsw0->get_dist_call_counter());   // SIGM patch: emit distance count for INSERT (same as the NGM/IGTM/CGTM/ES branches)
+             }
+         }
+         printf("Insert task do not re-test the performance.\n");
