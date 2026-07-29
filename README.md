@@ -63,7 +63,7 @@ scripts/
   graph_structure.py   degree distribution + connectivity from level-0 dumps
   xval_python_ref.py   cross-validate the C++ ports against Ponomarenko's Python
   patch_hnswmerger_gist.py  add a GIST1M workload to an upstream clone
-results_bigann*.jsonl  the scale-sweep logs (the paper's data)
+results/bigann*.jsonl  the scale-sweep logs (the paper's data)
 results/legacy/        pre-BIGANN SIFT1M / GIST1M runs
 docs/figures/          generated figures
 tests/                 parser tests for the C++ stdout
@@ -83,8 +83,8 @@ python -m ngmbench.prepare_bigann --src data/bigann --out data/sift_scales \
 # 3. run a scale
 python -m ngmbench.cli_cpp --config config/bigann100k_sweep.json
 # 4. figures + trends
-python scripts/make_figures.py --results results_bigann*.jsonl --out docs/figures
-python scripts/analyse_trends.py --results results_bigann*.jsonl \
+python scripts/make_figures.py --results results/bigann10k.jsonl results/bigann100k.jsonl results/bigann1m.jsonl results/bigann10m.jsonl --out docs/figures
+python scripts/analyse_trends.py --results results/bigann10k.jsonl results/bigann100k.jsonl results/bigann1m.jsonl results/bigann10m.jsonl \
        --density docs/figures/structure/graph_structure.csv --out docs/figures/trends
 ```
 

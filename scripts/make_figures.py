@@ -1,6 +1,6 @@
 """Generate publication figures from the results logs.
 
-    python scripts/make_figures.py --results results_cpp.jsonl results_sift.jsonl --out docs/figures
+    python scripts/make_figures.py --results results/bigann10k.jsonl results/bigann100k.jsonl --out docs/figures
 
 Reads one or more JSONL result logs, applies the known corrections, and writes
 PNG+PDF figures plus a summary CSV. Corrections (see README "data hazards"):

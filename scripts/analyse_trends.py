@@ -14,8 +14,8 @@ density CSV, and emits three analyses + figures:
 
 
     python scripts/analyse_trends.py \
-        --results results_bigann10k.jsonl results_bigann100k.jsonl \
-                  results_bigann1m.jsonl  results_bigann10m.jsonl \
+        --results results/bigann10k.jsonl results/bigann100k.jsonl \
+                  results/bigann1m.jsonl  results/bigann10m.jsonl \
         --density docs/figures/structure/graph_structure.csv \
         --target 0.95 --out docs/figures/trends
 
