@@ -23,7 +23,7 @@ producing one index from two, by whatever means.
 | strategy    | what it does                                              | source |
 |-------------|-----------------------------------------------------------|--------|
 | **Rebuild** | discard both indices, build one from scratch over all N   | baseline |
-| **SIGM**    | seed from one index, insert the other's points (insertion)| Ponomarenko |
+| **SIGM**    | seed from one index, insert the other's points (insertion)| baseline |
 | **NGM/IGTM/CGTM** | two-way neighbour search between the two graphs      | Ponomarenko, arXiv:2505.16064 |
 | **HNSW-Merger** | one-way top-λ forward search + backward direct-connect | Jin et al., SIGMOD'26 |
 
@@ -45,10 +45,7 @@ producing one index from two, by whatever means.
 - **Density is edge placement, not edge count.** At identical mean degree (~13.7),
   NGM searches ~15 % cheaper than IGTM/CGTM: its two-way full search places
   better-positioned edges. Merges never fragment connectivity.
-- **Reviewer resolution.** «Перестроение» in Ponomarenko's table is **SIGM**
-  (insertion-merge), not monolithic Rebuild; on the merge column the traversal
-  merges do beat SIGM at every scale, as claimed.
-
+  
 ## Layout
 
 ```
