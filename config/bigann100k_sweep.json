@@ -10,74 +10,351 @@
     "rebuilds its own leaves - that is correct, not waste."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann100k",
     "dim": 128,
     "nb": 100000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_gt.ivecs"
+    "base": "data/sift_scales/sift100k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift100k_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_bigann100k",
-  "results_path": "/home/remotedt/CoursePaper2026/results_bigann100k.jsonl",
-
+  "workdir": ".work_bigann100k",
+  "results_path": "results/bigann100k.jsonl",
   "sweep": [
-    {"algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 40, "local_ef": 10, "next_step_k": 6, "next_step_ef": 6, "search_M": 40},
-      {"jump_ef": 20, "local_ef": 5,  "next_step_k": 3, "next_step_ef": 3, "search_M": 3},
-      {"jump_ef": 64, "local_ef": 5,  "next_step_k": 3, "next_step_ef": 3, "search_M": 5},
-      {"jump_ef": 5,  "local_ef": 7,  "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 40, "local_ef": 10, "next_step_k": 6, "search_M": 40},
-      {"jump_ef": 20, "local_ef": 5,  "next_step_k": 3, "search_M": 3},
-      {"jump_ef": 15, "local_ef": 5,  "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["NGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"search_ef": 40}, {"search_ef": 20}, {"search_ef": 10}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_lambda": 1}, {"merge_lambda": 2}, {"merge_lambda": 4},
-      {"merge_lambda": 10}, {"merge_lambda": 20}
-    ]},
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_ef_construction": -1}, {"merge_ef_construction": 48},
-      {"merge_ef_construction": 32}, {"merge_ef_construction": 16}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [{}]},
-
-    {"_axis": "ef_construction - same four algos at their best-guess configs",
-     "algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64,  "jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5},
-      {"ef_construction": 32,  "jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5},
-      {"ef_construction": 32, "jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "merge_lambda": 4}, {"ef_construction": 32, "merge_lambda": 4}
-    ]},
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "merge_ef_construction": -1},
-      {"ef_construction": 32, "merge_ef_construction": -1}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [
-      {"ef_construction": 64}, {"ef_construction": 32}
-    ]},
-
-    {"_axis": "one point aligned with the SIGMOD paper's defaults (M=32, efc=64, lambda=4)",
-     "algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"M": 32, "ef_construction": 64, "merge_lambda": 4}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [
-      {"M": 32, "ef_construction": 64}
-    ]}
+    {
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 40,
+          "local_ef": 10,
+          "next_step_k": 6,
+          "next_step_ef": 6,
+          "search_M": 40
+        },
+        {
+          "jump_ef": 20,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 3
+        },
+        {
+          "jump_ef": 64,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        },
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 40,
+          "local_ef": 10,
+          "next_step_k": 6,
+          "search_M": 40
+        },
+        {
+          "jump_ef": 20,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 3
+        },
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 40
+        },
+        {
+          "search_ef": 20
+        },
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 1
+        },
+        {
+          "merge_lambda": 2
+        },
+        {
+          "merge_lambda": 4
+        },
+        {
+          "merge_lambda": 10
+        },
+        {
+          "merge_lambda": 20
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": -1
+        },
+        {
+          "merge_ef_construction": 48
+        },
+        {
+          "merge_ef_construction": 32
+        },
+        {
+          "merge_ef_construction": 16
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    },
+    {
+      "_axis": "ef_construction - same four algos at their best-guess configs",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_lambda": 4
+        },
+        {
+          "ef_construction": 32,
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_ef_construction": -1
+        },
+        {
+          "ef_construction": 32,
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64
+        },
+        {
+          "ef_construction": 32
+        }
+      ]
+    },
+    {
+      "_axis": "one point aligned with the SIGMOD paper's defaults (M=32, efc=64, lambda=4)",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "M": 32,
+          "ef_construction": 64,
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "M": 32,
+          "ef_construction": 64
+        }
+      ]
+    }
   ]
 }

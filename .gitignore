@@ -1,7 +1,7 @@
 # --- datasets (download locally via scripts/get_data.sh; large) ---
 data/
 
-# --- vendored upstream C++ (clone via the note in cpp/README.md; unlicensed) ---
+# --- vendored upstream C++ (clone per cpp/README.md; unlicensed) ---
 vendor_repo/
 HNSWMerger/
 
@@ -19,6 +19,9 @@ cpp/exps
 cpp/builds
 cpp/dump_graph
 *.o
+
+# --- local env (machine-specific paths; copy from .env.example) ---
+.env
 
 # --- python ---
 __pycache__/

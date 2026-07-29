@@ -608,8 +608,8 @@ def write_summary(rows, out):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", nargs="+",
-                    default=["results_cpp.jsonl", "results_sift.jsonl",
-                             "results_gist_cpp.jsonl", "results_gist.jsonl", "results.jsonl"])
+                    default=["results/bigann10k.jsonl", "results/bigann100k.jsonl",
+                             "results/bigann1m.jsonl", "results/bigann10m.jsonl"])
     ap.add_argument("--out", default="docs/figures")
     a = ap.parse_args(argv)
     rows = correct(load(a.results))

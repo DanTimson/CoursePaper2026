@@ -11,24 +11,50 @@
     "SIGM logs null recall (returns before eval) - expected, not a failure."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann100k",
     "dim": 128,
     "nb": 100000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_gt.ivecs"
+    "base": "data/sift_scales/sift100k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift100k_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_sigm100k",
-  "results_path": "/home/remotedt/CoursePaper2026/results_struct_sigm100k.jsonl",
-
+  "workdir": ".work_sigm100k",
+  "results_path": "results/struct_sigm100k.jsonl",
   "sweep": [
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [{}]}
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    }
   ]
 }

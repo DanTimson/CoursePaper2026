@@ -10,39 +10,137 @@
     "degeneracy, not a wiring fault. It should resolve at 100k."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann10k",
     "dim": 128,
     "nb": 10000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift10k_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift10k_gt.ivecs"
+    "base": "data/sift_scales/sift10k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift10k_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_bigann10k",
-  "results_path": "/home/remotedt/CoursePaper2026/results_bigann10k.jsonl",
-
+  "workdir": ".work_bigann10k",
+  "results_path": "results/bigann10k.jsonl",
   "sweep": [
-    {"algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["NGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"search_ef": 40}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_lambda": 4}
-    ]},
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_ef_construction": -1}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [{}]}
+    {
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 40
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    }
   ]
 }

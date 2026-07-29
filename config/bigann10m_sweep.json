@@ -12,61 +12,268 @@
     "Run `rm -f .work_bigann10m/merged_*.hnsw` when the rows are in the JSONL."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann10m",
     "dim": 128,
     "nb": 10000000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift10m_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift10m_gt.ivecs"
+    "base": "data/sift_scales/sift10m_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift10m_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_bigann10m",
-  "results_path": "/home/remotedt/CoursePaper2026/results_bigann10m.jsonl",
-
+  "workdir": ".work_bigann10m",
+  "results_path": "results/bigann10m.jsonl",
   "sweep": [
-    {"_block": "efc=200 - the group where HNSWMerger beat monolithic at 10m",
-     "algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["NGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"search_ef": 10}, {"search_ef": 20}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_lambda": 1}, {"merge_lambda": 4},
-      {"merge_lambda": 10}, {"merge_lambda": 20}
-    ]},
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_ef_construction": -1}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [{}]},
-
-    {"_block": "ef_construction axis - does the crossover survive a cheaper build?",
-     "algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5},
-      {"ef_construction": 32, "jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5},
-      {"ef_construction": 32, "jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "merge_lambda": 4}, {"ef_construction": 32, "merge_lambda": 4}
-    ]},
-    {"algo": ["SIGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"ef_construction": 64, "merge_ef_construction": -1},
-      {"ef_construction": 32, "merge_ef_construction": -1}
-    ]},
-    {"algo": ["INSERT"], "n_parts": [1], "order": ["balanced"], "params": [
-      {"ef_construction": 64}, {"ef_construction": 32}
-    ]}
+    {
+      "_block": "efc=200 - the group where HNSWMerger beat monolithic at 10m",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        },
+        {
+          "search_ef": 20
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 1
+        },
+        {
+          "merge_lambda": 4
+        },
+        {
+          "merge_lambda": 10
+        },
+        {
+          "merge_lambda": 20
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    },
+    {
+      "_block": "ef_construction axis - does the crossover survive a cheaper build?",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_lambda": 4
+        },
+        {
+          "ef_construction": 32,
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_ef_construction": -1
+        },
+        {
+          "ef_construction": 32,
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64
+        },
+        {
+          "ef_construction": 32
+        }
+      ]
+    }
   ]
 }

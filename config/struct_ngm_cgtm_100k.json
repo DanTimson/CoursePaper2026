@@ -6,7 +6,7 @@
     "independent of scale, so NO 10M run is needed.",
     "",
     "Run with the dump hook on:",
-    "  NGMBENCH_DUMP_DIR=~/CoursePaper2026/dumps \\",
+    "  NGMBENCH_DUMP_DIR=dumps \\",
     "    python -m ngmbench.cli_cpp --config config/struct_ngm_cgtm_100k.json",
     "",
     "These route through merge_pair, so the hook catches them. IGTM + HNSWMerger",
@@ -18,29 +18,71 @@
     "Canonical (iso-quality winner) config per algorithm, matching the summary rows."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann100k",
     "dim": 128,
     "nb": 100000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_gt.ivecs"
+    "base": "data/sift_scales/sift100k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift100k_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_structdens",
-  "results_path": "/home/remotedt/CoursePaper2026/results_structdens.jsonl",
-
+  "workdir": ".work_structdens",
+  "results_path": "results/structdens.jsonl",
   "sweep": [
-    {"algo": ["NGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"search_ef": 10}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]}
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    }
   ]
 }

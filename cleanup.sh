@@ -6,10 +6,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-
-echo "== 6. standardize prepare_bigann (keep package copy, drop script dup) =="
-git rm -q scripts/prepare_bigann.py
-
+echo "== 7. move live result logs into results/ (relative, prefix dropped) =="
+mkdir -p results
+for f in bigann10k bigann100k bigann1m bigann10m          struct100k struct_insert100k struct_sigm100k structdens; do
+    [ -e "results_${f}.jsonl" ] && git mv "results_${f}.jsonl" "results/${f}.jsonl"
+done
+ 
 echo
 echo "Done. Now copy in the regenerated files (new __init__.py, .gitignore,"
 echo "README.md, cpp/, and the de-narrated scripts), then:"

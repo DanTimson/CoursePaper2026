@@ -2,7 +2,7 @@
   "_comment": [
     "Structural-dump config: regenerates the merged graphs for graph_structure.py.",
     "Run with NGMBENCH_DUMP_DIR set, e.g.:",
-    "  NGMBENCH_DUMP_DIR=~/CoursePaper2026/dumps \\",
+    "  NGMBENCH_DUMP_DIR=dumps \\",
     "    python -m ngmbench.cli_cpp --config config/struct_100k.json",
     "Each merge writes a self-describing copy <method>_<workload>_M16_efc200_<params>.hnsw",
     "into that dir, so no uuid matching is needed.",
@@ -16,35 +16,107 @@
     "One param point per algorithm - the iso-quality winners from the 100k sweep."
   ],
   "binaries": {
-    "builds": "/home/remotedt/HNSWMerger/HNSW-Merger/builds",
-    "exps": "/home/remotedt/HNSWMerger/HNSW-Merger/exps"
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
   },
   "dataset": {
     "name": "bigann100k",
     "dim": 128,
     "nb": 100000,
-    "base": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_base.fvecs",
-    "query": "/home/remotedt/CoursePaper2026/data/sift_scales/sift_query.fvecs",
-    "groundtruth": "/home/remotedt/CoursePaper2026/data/sift_scales/sift100k_gt.ivecs"
+    "base": "data/sift_scales/sift100k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift100k_gt.ivecs"
   },
-  "hnsw": {"M": 16, "ef_construction": 200},
-  "eval": {"k": 10, "kk": 100, "nq": 10000, "efs_array": [10, 50, 100, 200, 400]},
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
   "threads": 1,
-  "workdir": "/home/remotedt/CoursePaper2026/.work_struct100k",
-  "results_path": "/home/remotedt/CoursePaper2026/results_struct100k.jsonl",
-
+  "workdir": ".work_struct100k",
+  "results_path": "results/struct100k.jsonl",
   "sweep": [
-    {"algo": ["IGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 5, "local_ef": 7, "next_step_k": 3, "next_step_ef": 3, "search_M": 5}
-    ]},
-    {"algo": ["CGTM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5}
-    ]},
-    {"algo": ["NGM"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"search_ef": 10}
-    ]},
-    {"algo": ["TWO_MERGE"], "n_parts": [2], "order": ["balanced"], "params": [
-      {"merge_lambda": 4}
-    ]}
+    {
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4
+        }
+      ]
+    }
   ]
 }

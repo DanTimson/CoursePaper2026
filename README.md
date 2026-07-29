@@ -77,7 +77,9 @@ tests/                 parser tests for the C++ stdout
 ```bash
 pip install -r requirements.txt
 
-# 1. build the C++ backend (see cpp/README.md), point config binaries at it
+# 1. build the C++ backend (see cpp/README.md), then point HNSWMERGER_BIN at it:
+cp .env.example .env      # edit HNSWMERGER_BIN to your HNSW-Merger clone
+set -a; . .env; set +a    # export it for this shell
 # 2. fetch data
 python -m ngmbench.prepare_bigann --src data/bigann --out data/sift_scales \
        --scales 10000 100000 1000000 10000000 --k 100

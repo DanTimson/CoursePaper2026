@@ -137,14 +137,25 @@ class Paths:
     workdir: str             # scratch dir for indexes + configs
 
     def __post_init__(self):
-        # _run executes the binaries with cwd=dirname(binary), i.e. inside the
-        # HNSWMerger tree - NOT the project root. Any relative path from a config
-        # would therefore be resolved against the wrong repo. Normalise everything
-        # here, against the caller's cwd, so configs may use either form.
+        # Normalise every path once, here, so configs stay portable:
+        #   $VARS   -> os.path.expandvars  (e.g. $HNSWMERGER_BIN for the separate
+        #             binaries clone; repo-internal paths need no var and stay
+        #             relative)
+        #   ~       -> expanduser
+        #   relative-> resolved against cwd (the repo root)
+        # This matters because _run executes the binaries with cwd=dirname(binary),
+        # inside the HNSWMerger tree, so a bare relative path would otherwise
+        # resolve against the wrong repo.
         for f in ("builds_bin", "exps_bin", "base", "query", "groundtruth", "workdir"):
             v = getattr(self, f)
             if v:
-                setattr(self, f, os.path.abspath(os.path.expanduser(v)))
+                v = os.path.expandvars(os.path.expanduser(v))
+                if "$" in v:
+                    raise ValueError(
+                        f"Paths.{f}: unresolved environment variable in {v!r}. "
+                        f"Set it (e.g. export HNSWMERGER_BIN=/path/to/HNSW-Merger) "
+                        f"or see .env.example.")
+                setattr(self, f, os.path.abspath(v))
         for f in ("base", "query", "groundtruth"):
             v = getattr(self, f)
             if not os.path.exists(v):
