@@ -72,7 +72,6 @@ def ds_display(ds_key):
     if m:
         return f"SIFT {m.group(1)}{m.group(2).upper()} (BIGANN)"
     return (ds_key or "").upper()
-CANON_RECALL_FLOOR = 0.90   # bar charts pick the cheapest merge above this recall
 ISO_TARGETS = [0.90, 0.95]  # recall levels for the iso-quality scatter
 plt.rcParams.update({
     "figure.dpi": 120, "savefig.dpi": 160, "font.size": 11,
@@ -239,20 +238,6 @@ def fig_iso_quality(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
     ax.set_title(f"Merge cost at matched search quality, {n_parts} partitions ({ds})")
     ax.legend(title="algorithm", fontsize=9)
     _save(fig, out, f"iso_quality_r{int(target*100)}")
-
-
-def _row(rows, algo, p):
-    cand = [r for r in rows if r.get("algo") == algo and r.get("n_parts") == p
-            and r.get("builder") == "hnswmerger"]
-    if not cand:
-        return None
-    # With a parameter sweep there are several rows per (algo, n_parts). The bar
-    # charts need one canonical point: the cheapest merge among rows that still
-    # reach the quality floor. Rows with no recall are kept only as a fallback so
-    # SIGM (recall is null on the INSERT path) does not vanish from the charts.
-    ok = [r for r in cand if (r.get("recall@10") or 0) >= CANON_RECALL_FLOOR]
-    pool = ok or cand
-    return min(pool, key=lambda r: r.get("merge_calc") or float("inf"))
 
 
 def _shared_build_g(rows, p):

@@ -1,24 +1,23 @@
-from .base import (
-    SubIndex,
-    build_leaf,
-    build_sigm,
-    deserialize,
-    quality_stats,
-    serialize,
-    shift_ids,
+"""C++-backend index construction: shells out to a patched HNSWMerger build.
+
+The pure-Python merge implementations (base/merge/nndescent) were removed once the
+C++ backend and the reference cross-validation (scripts/xval_python_ref.py) became
+the live path; only the subprocess driver remains here.
+"""
+from .hnswmerger import (
+    CppParams,
+    Paths,
+    run_hnswmerger,
+    parse_builds,
+    parse_exps,
+    contiguous_partitions,
 )
-from .merge import divide_and_conquer, merge_pair
-from .nndescent import build_and_eval_nndescent
 
 __all__ = [
-    "SubIndex",
-    "build_leaf",
-    "build_sigm",
-    "serialize",
-    "deserialize",
-    "shift_ids",
-    "quality_stats",
-    "merge_pair",
-    "divide_and_conquer",
-    "build_and_eval_nndescent",
+    "CppParams",
+    "Paths",
+    "run_hnswmerger",
+    "parse_builds",
+    "parse_exps",
+    "contiguous_partitions",
 ]

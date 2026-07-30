@@ -1,0 +1,356 @@
+{
+  "_comment": [
+    "10k sweep for deep (dim 96, L2): merge-parameter grid + ef_construction",
+    "axis at n_parts=2, mirroring the SIFT template. Ground truth is exact L2",
+    "k-NN of the query set within this N-prefix (prepare_dataset.py).",
+    "Workload maps to DEEP1M in test_config.h via dim=96."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "dataset": {
+    "name": "deep10k",
+    "dim": 96,
+    "nb": 10000,
+    "base": "data/deep_scales/deep10k_base.fvecs",
+    "query": "data/deep_scales/deep_query.fvecs",
+    "groundtruth": "data/deep_scales/deep10k_gt.ivecs"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
+  "threads": 1,
+  "workdir": ".work_deep10k",
+  "results_path": "results/deep10k.jsonl",
+  "sweep": [
+    {
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 40,
+          "local_ef": 10,
+          "next_step_k": 6,
+          "next_step_ef": 6,
+          "search_M": 40
+        },
+        {
+          "jump_ef": 20,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 3
+        },
+        {
+          "jump_ef": 64,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        },
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 40,
+          "local_ef": 10,
+          "next_step_k": 6,
+          "search_M": 40
+        },
+        {
+          "jump_ef": 20,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 3
+        },
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 40
+        },
+        {
+          "search_ef": 20
+        },
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 1
+        },
+        {
+          "merge_lambda": 2
+        },
+        {
+          "merge_lambda": 4
+        },
+        {
+          "merge_lambda": 10
+        },
+        {
+          "merge_lambda": 20
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": -1
+        },
+        {
+          "merge_ef_construction": 48
+        },
+        {
+          "merge_ef_construction": 32
+        },
+        {
+          "merge_ef_construction": 16
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    },
+    {
+      "_axis": "ef_construction - same four algos at their best-guess configs",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        },
+        {
+          "ef_construction": 32,
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_lambda": 4
+        },
+        {
+          "ef_construction": 32,
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64,
+          "merge_ef_construction": -1
+        },
+        {
+          "ef_construction": 32,
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "ef_construction": 64
+        },
+        {
+          "ef_construction": 32
+        }
+      ]
+    },
+    {
+      "_axis": "one point aligned with the SIGMOD paper's defaults (M=32, efc=64, lambda=4)",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "M": 32,
+          "ef_construction": 64,
+          "merge_lambda": 4
+        }
+      ]
+    },
+    {
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "M": 32,
+          "ef_construction": 64
+        }
+      ]
+    }
+  ]
+}

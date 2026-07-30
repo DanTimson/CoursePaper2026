@@ -201,7 +201,9 @@ def density_vs_ds(rows, out, target, density_csv, csv_rows, ds_name):
     dens = {}
     for r in csv.DictReader(open(density_csv)):
         dens[r["label"].upper()] = float(r["mean_degree"])
-    # join by strategy: canonical (cheapest) config per algo
+    # join by strategy: best-quality operating point (lowest d_s) per algo.
+    # SIGM has no d_s (null recall on the INSERT path) so it is excluded here;
+    # the traversal merges are compared at their best search quality.
     pts = []
     for algo in ["TWO_MERGE", "IGTM", "CGTM", "NGM", "SIGM"]:
         key = STRAT_LABEL[algo].upper()
@@ -214,7 +216,7 @@ def density_vs_ds(rows, out, target, density_csv, csv_rows, ds_name):
         cand = [(d, r) for d, r in cand if d is not None]
         if not cand:
             continue
-        dsv = min(cand)[0]
+        dsv = min(cand)[0]   # lowest d_s = best search quality for this algo
         pts.append((algo, d_val, float(dsv)))
         csv_rows.append({"analysis": "density_vs_ds", "dataset": ds_name,
                          "x": algo, "value": d_val, "detail": f"d_s={dsv:.1f}"})

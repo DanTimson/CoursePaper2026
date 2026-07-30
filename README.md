@@ -1,8 +1,6 @@
 # Fast Navigable Graph Construction by Merge
 
-Experiment harness for the master's course paper *«Быстрое построение
-навигационных графов используя операцию объединения»* (HSE Nizhny Novgorod,
-Data Intelligence). It compares strategies for building an HNSW index by
+Compare strategies for building an HNSW index by
 **merging** partition sub-indices against **full rebuild**, on the distance-
 computation axis, across four decades of scale.
 

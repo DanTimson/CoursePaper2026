@@ -42,7 +42,13 @@ ALGO_TO_METHOD = {
 }
 
 # workload_type providing dim/k/kk/nq defaults; we still set dim/nb explicitly
-WORKLOAD = {128: "SIFT1M", 960: "GIST1M"}   # GIST1M requires the test_config patch
+# dim -> upstream workload enum name (provides metric + k/kk/nq defaults; dim/nb
+# are still set explicitly per run). SIFT/DEEP/TURING ship in upstream test_config.h;
+# GIST and COHERE require the corresponding scripts/patch_hnswmerger_*.py patch.
+# NOTE: verify these enum spellings against your test_config.h - upstream uses the
+# "<NAME>1M" convention (SIFT1M, not SIFT10M); a wrong string silently falls back.
+WORKLOAD = {128: "SIFT1M", 96: "DEEP10M", 100: "TURING10M",
+            960: "GIST1M", 768: "COHERE1M"}
 
 
 # --------------------------------------------------------------------------- #
