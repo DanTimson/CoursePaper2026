@@ -1,101 +1,162 @@
-# Fast Navigable Graph Construction by Merge
+# Total-cost merge experiment
 
-Compare strategies for building an HNSW index by
-**merging** partition sub-indices against **full rebuild**, on the distance-
-computation axis, across four decades of scale.
+This patch turns the direct build-budget sweep into a complete end-to-end
+single-thread experiment:
 
-## Question
+\[
+T_A(N,P)=\sum_j B(S_j)+C_A(N,P)
+\]
 
-Given two HNSW indices, what is the cheapest way to produce one merged index —
-and how does the answer change with dataset size? Full rebuild, sequential
-insertion, and several graph-merge algorithms are all *merge strategies* for this
-task; the paper compares their **merge cost** in distance computations (language-
-and thread-independent), alongside the **search quality** (d_s at matched recall,
-and wall-clock QPS) of the index each produces, from 10⁴ to 10⁷ vectors.
+with the build term always taken from the independent `BUILD_ONLY` sweep.
 
-The comparison is on the merge operation itself, not on total from-scratch
-construction cost: partitioning's build saving is a fixed Θ(N log P) per point
-while a merge is Θ(N log N), so no merge asymptotically undercuts a full rebuild
-on *total* cost — the interesting axis is the cost and quality of the merge
-step, where the strategies differ by more than an order of magnitude.
+## Files to copy
 
-## Strategies compared
-
-All are treated as **merge strategies** in the sense of Jin et al. (SIGMOD'26):
-producing one index from two, by whatever means.
-
-| strategy    | what it does                                              | source |
-|-------------|-----------------------------------------------------------|--------|
-| **Rebuild** | discard both indices, build one from scratch over all N   | baseline |
-| **SIGM**    | seed from one index, insert the other's points (insertion)| baseline |
-| **NGM/IGTM/CGTM** | two-way neighbour search between the two graphs      | Ponomarenko, arXiv:2505.16064 |
-| **HNSW-Merger** | one-way top-λ forward search + backward direct-connect | Jin et al., SIGMOD'26 |
-
-## Key findings
-
-- **Merge cost, all scales.** On the merge-cost axis, HNSW-Merger is 18–37×
-  cheaper than a full rebuild and the traversal merges (IGTM/CGTM/NGM) 2–13×, at
-  every scale from 10⁴ to 10⁷. The ordering — HNSW-Merger < IGTM < CGTM ≈ NGM <
-  SIGM < Rebuild — is stable across four decades
-  (`docs/figures/_scale/merge_strategies_grid.png`,
-  `docs/figures/_scale/scale_trend.png`).
-- **Reviewer's claim confirmed.** On the merge column the traversal merges beat
-  SIGM (sequential insertion, «перестроение» in Ponomarenko's table) at every
-  scale — the point the course review turned on.
-- **Iso-quality: λ is a clean dial.** HNSW-Merger's λ trades merge cost for search
-  quality (d_s at matched recall) monotonically, with diminishing returns past
-  λ = 4 — the basis for the default λ = 4
-  (`docs/figures/bigann*/iso_quality_r95.png`).
-- **Density is edge placement, not edge count.** At identical mean degree (~13.7),
-  NGM searches ~15 % cheaper than IGTM/CGTM: its two-way full search places
-  better-positioned edges. Merges never fragment connectivity.
-  
-## Layout
-
-```
-ngmbench/              live experiment package (C++ backend driver)
-  cli_cpp.py           entry point: expands a sweep config, runs, logs JSONL
-  index/hnswmerger.py  shells out to the patched HNSWMerger ./exps / ./builds
-  cache.py             JSONL results log + skip-cache
-  config.py            dataclasses for run configs
-  prepare_bigann.py    extract SIFT prefixes (10k/100k/1M/10M) from BIGANN
-cpp/                   patched HNSWMerger sources (see cpp/README.md)
-config/                sweep + structural-dump configs
-scripts/
-  make_figures.py      all paper figures from the JSONL logs
-  analyse_trends.py    λ frontier, ef_construction sensitivity, density vs d_s
-  graph_structure.py   degree distribution + connectivity from level-0 dumps
-  xval_python_ref.py   cross-validate the C++ ports against Ponomarenko's Python
-  patch_hnswmerger_gist.py  add a GIST1M workload to an upstream clone
-results/bigann*.jsonl  the scale-sweep logs (the paper's data)
-results/legacy/        pre-BIGANN SIFT1M / GIST1M runs
-docs/figures/          generated figures
-tests/                 parser tests for the C++ stdout
+```text
+ngmbench/index/hnswmerger.py
+ngmbench/cli_cpp.py
+scripts/plot_total_cost_experiment.py
+config/total_cost_bigann10k.json
+config/total_cost_bigann100k.json
+config/total_cost_bigann1m.json
+config/total_cost_bigann1m_pilot.json
+tests/test_total_cost_experiment.py
 ```
 
-## Reproduce
+The two Python package files replace the current repository versions. The rest
+are additions.
+
+## What changed in the runner
+
+- Records every pairwise merge step: input sizes, output size, distance count,
+  wall time, merge-tree level, and lambda used.
+- With top-level `cleanup_merged: true`, deletes intermediate merged indexes
+  after they are consumed and deletes the final merged index after its recall
+  curve has been recorded. Existing configs without this key keep old behavior.
+- Keeps cached leaf indexes.
+- Set `NGMBENCH_KEEP_MERGED=1` to retain final merged indexes even when cleanup
+  is enabled.
+- Supports HNSW-Merger `merge_lambda_mode`:
+  - `fixed`
+  - `adaptive`, using the log-size interpolation described in Section 7.2 of
+    Jin et al.
+- Preserves an optional human-readable `label` from the sweep config.
+
+For the current `M=16`, `lambda0=4` balanced P=16 tree, adaptive lambda uses
+approximately `4, 7, 10, 13` by merge-tree level. The large-first chain raises
+lambda more gradually as the accumulator grows.
+
+## Strategies
+
+The full matrix uses:
+
+- IGTM tuned, balanced
+- CGTM tuned, balanced
+- NGM `search_ef=10`, balanced
+- HNSW-Merger fixed lambda=4, balanced
+- HNSW-Merger fixed lambda=4, large-first
+- HNSW-Merger adaptive lambda, large-first
+
+`SIGM` is deliberately excluded from the P>2 end-to-end matrix. It does not
+merge the graph structures of all input leaves; it retains the first graph and
+reinserts the remaining vectors. Charging it for P independently built leaves
+would count work that its actual construction path never needs. Keep SIGM as a
+separate insertion baseline rather than mixing it into the graph-merge total.
+
+## Run order
+
+From the repository root:
 
 ```bash
-pip install -r requirements.txt
+set -a
+. .env
+set +a
 
-# 1. build the C++ backend (see cpp/README.md), then point HNSWMERGER_BIN at it:
-cp .env.example .env      # edit HNSWMERGER_BIN to your HNSW-Merger clone
-set -a; . .env; set +a    # export it for this shell
-# 2. fetch data
-python -m ngmbench.prepare_bigann --src data/bigann --out data/sift_scales \
-       --scales 10000 100000 1000000 10000000 --k 100
-# 3. run a scale
-python -m ngmbench.cli_cpp --config config/bigann100k_sweep.json
-# 4. figures + trends
-python scripts/make_figures.py --results results/bigann10k.jsonl results/bigann100k.jsonl results/bigann1m.jsonl results/bigann10m.jsonl --out docs/figures
-python scripts/analyse_trends.py --results results/bigann10k.jsonl results/bigann100k.jsonl results/bigann1m.jsonl results/bigann10m.jsonl \
-       --density docs/figures/structure/graph_structure.csv --out docs/figures/trends
+cp ngmbench/index/hnswmerger.py ngmbench/index/hnswmerger.py.before-total-cost
+cp ngmbench/cli_cpp.py ngmbench/cli_cpp.py.before-total-cost
+
+pytest -q tests/test_total_cost_experiment.py
 ```
 
-## References
+Run the inexpensive scales first:
 
-- A. Ponomarenko. *Three Algorithms for Merging Hierarchical Navigable Small
-  World Graphs.* arXiv:2505.16064.
-- C. Jin, Y. Zhang, J. Liu, J. Wang. *Efficient Vector Index Merging in Vector
-  Databases.* Proc. ACM Manag. Data 4(1), SIGMOD'26, art. 31.
-  <https://doi.org/10.1145/3786645>
+```bash
+python -m ngmbench.cli_cpp --config config/total_cost_bigann10k.json
+python -m ngmbench.cli_cpp --config config/total_cost_bigann100k.json
+```
+
+For 1M, start with the resumable pilot:
+
+```bash
+python -m ngmbench.cli_cpp --config config/total_cost_bigann1m_pilot.json
+```
+
+Then complete only the missing P=16 traversal-merge rows:
+
+```bash
+python -m ngmbench.cli_cpp --config config/total_cost_bigann1m.json
+```
+
+Both 1M configs write to the same JSONL. Existing `run_key` rows are skipped.
+
+## Generate figures
+
+Use the direct build-budget CSV already produced by the build-only sweep:
+
+```bash
+python scripts/plot_total_cost_experiment.py \
+  --build-budget docs/figures/build_budget/build_budget.csv \
+  --merge-results \
+    results/total_cost_bigann10k.jsonl \
+    results/total_cost_bigann100k.jsonl \
+    results/total_cost_bigann1m.jsonl \
+  --strict-build-check \
+  --out docs/figures/total_cost
+```
+
+If your build-budget CSV is currently elsewhere, pass its actual path.
+
+## Main outputs
+
+- `p2_components_by_scale`
+  - for each strategy: two-leaf build, merge, and total versus 10K/100K/1M,
+    normalized by monolithic build.
+- `p2_total_ratio_by_scale`
+  - all P=2 total curves together.
+- `components_by_partitions_<dataset>`
+  - build, merge, and total versus P for every strategy.
+- `total_ratio_by_partitions`
+  - direct break-even chart; horizontal 1.0 is monolithic construction.
+- `merge_budget_utilization`
+  - \(C_A/[B(N)-L(N,P)]\); below 1 wins.
+- `required_merge_speedup`
+  - the algorithm-independent speedup over rebuild required merely to fit the
+    measured build budget.
+- `quality_recall_at_ef100`
+  - recall degradation or improvement as repeated merges accumulate.
+- `quality_ds_at_recall095`
+  - search distance work at matched recall, where the curve reaches 0.95.
+- `merge_cost_by_level_p16`
+  - where repeated-merge work is spent in the tree/chain.
+- `total_cost_summary.csv`
+  - all normalized and absolute quantities.
+- `merge_steps.csv`
+  - every pairwise merge operation.
+
+## Interpretation discipline
+
+The main work comparison is:
+
+```text
+directly measured sum of leaf builds
++ directly measured sum of pairwise merges
+------------------------------------------------
+directly measured monolithic build
+```
+
+The merge-run `build_calc` is checked against the independent build-budget
+table but is not used as the authoritative source.
+
+The operation-count result and quality result should be reported together.
+Fixed lambda=4 is expected to be the cheapest HNSW-Merger variant, but repeated
+merges may reduce quality. The adaptive large-first variant is the paper-aligned
+multi-index comparison.

@@ -317,6 +317,110 @@ def _scale_of(ds_name):
     return v * {"k": 1_000, "m": 1_000_000, "": 1}[u]
 
 
+def fig_cross_dataset(dataset_files, out, scale_label="1M"):
+    """Cross-dataset stability: canonical merge cost per strategy, NORMALIZED to
+    each dataset's own Rebuild total, grouped by strategy across datasets at a
+    fixed scale. Normalizing to Rebuild removes the ~10x absolute-cost spread
+    between datasets (Deep 96-d vs GIST 960-d) so the *ordering and relative
+    magnitude* are the visual point: the strategies cost a near-constant fraction
+    of a full rebuild regardless of embedding type.
+
+    dataset_files: list of (display_name, jsonl_path). Rebuild (INSERT total) is
+    the per-dataset denominator; merges use their canonical config at efc=200.
+    """
+    merges = ["TWO_MERGE", "IGTM", "CGTM", "NGM", "SIGM"]
+    data = {}   # display_name -> {strategy: fraction_of_rebuild}
+    for name, path in dataset_files:
+        if not os.path.exists(path):
+            print(f"  (cross: skip missing {path})"); continue
+        rows = [json.loads(l) for l in open(path) if l.strip()]
+        reb = next((r.get("total_calc") for r in rows
+                    if r.get("algo") == "INSERT" and r.get("builder") == "hnswmerger"
+                    and _efc_row(r) == 200), None)
+        if not reb:
+            print(f"  (cross: no Rebuild for {name})"); continue
+        frac = {}
+        for algo in merges:
+            c = _strategy_cost(rows, algo, 2)
+            if c:
+                frac[algo] = c / reb
+        data[name] = frac
+    if len(data) < 2:
+        print("  (skip cross_dataset: <2 datasets)"); return
+
+    names = list(data)
+    nD = len(names)
+    fig, ax = plt.subplots(figsize=(1.7 * nD + 3.5, 4.8))
+    x = range(len(merges))
+    width = 0.8 / nD
+    # a distinct hue per dataset, strategies share the x-axis
+    ds_colors = ["#8e44ad", "#2e86de", "#e67e22", "#16a085", "#c0392b", "#7f8c8d"]
+    for di, name in enumerate(names):
+        offs = [xi + (di - (nD - 1) / 2) * width for xi in x]
+        vals = [data[name].get(a, 0) for a in merges]
+        bars = ax.bar(offs, vals, width, label=name,
+                      color=ds_colors[di % len(ds_colors)],
+                      edgecolor="white", linewidth=0.4)
+        # light value labels so the ~0.05/0.10/0.15/0.50 bands are quantifiable
+        for b, v in zip(bars, vals):
+            if v > 0:
+                ax.text(b.get_x() + b.get_width() / 2, v + 0.006, f"{v:.2f}",
+                        ha="center", va="bottom", fontsize=5.5, color="#333",
+                        rotation=90)
+    ax.axhline(1.0, color="#555", lw=1.0, ls="--", alpha=0.6)
+    ax.text(len(merges) - 0.5, 1.01, "Rebuild = 1.0", fontsize=8,
+            color="#555", ha="right", va="bottom")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([STRATEGY_LABEL[a] for a in merges])
+    ax.set_ylabel("merge cost / dataset's own Rebuild cost")
+    ax.set_title(f"Merge cost relative to full rebuild across datasets "
+                 f"({scale_label})")
+    ax.legend(title="dataset", fontsize=9)
+    ax.set_ylim(0, max(0.6, max(v for d in data.values() for v in d.values()) * 1.15))
+    _save(fig, out, "cross_dataset")
+
+
+
+
+def fig_cross_scale(dataset_scale_files, out, focus="TWO_MERGE"):
+    """Cost-relative-to-Rebuild vs scale, one line per dataset, for a single
+    strategy (default HNSW-Merger). Shows the fraction is stable across BOTH
+    dataset and scale - the strongest single statement of the generalization.
+
+    dataset_scale_files: dict name -> {N: jsonl_path}.
+    """
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    ds_colors = ["#8e44ad", "#2e86de", "#e67e22", "#16a085", "#c0392b"]
+    any_line = False
+    for di, (name, scalemap) in enumerate(dataset_scale_files.items()):
+        xs, ys = [], []
+        for N in sorted(scalemap):
+            path = scalemap[N]
+            if not os.path.exists(path):
+                continue
+            rows = [json.loads(l) for l in open(path) if l.strip()]
+            reb = next((r.get("total_calc") for r in rows
+                        if r.get("algo") == "INSERT"
+                        and r.get("builder") == "hnswmerger"
+                        and _efc_row(r) == 200), None)
+            c = _strategy_cost(rows, focus, 2)
+            if reb and c:
+                xs.append(N); ys.append(c / reb)
+        if len(xs) >= 2:
+            any_line = True
+            ax.plot(xs, ys, "o-", color=ds_colors[di % len(ds_colors)], label=name)
+    if not any_line:
+        print("  (skip cross_scale: need >=2 scales per dataset)"); plt.close(fig); return
+    ax.set_xscale("log")
+    ax.set_xlabel("N (log)")
+    ax.set_ylabel(f"{STRATEGY_LABEL.get(focus, focus)} cost / Rebuild cost")
+    ax.set_ylim(bottom=0)
+    ax.set_title(f"{STRATEGY_LABEL.get(focus, focus)} cost relative to rebuild, "
+                 f"across scale and dataset")
+    ax.legend(title="dataset", fontsize=9)
+    _save(fig, out, "cross_scale")
+
+
 def fig_merge_strategies_grid(all_rows, out):
     """SIGMOD Fig.3-style small-multiples: one merge-cost bar panel per scale,
     Rebuild included as a strategy. The erosion of the merge advantage shows as
@@ -592,11 +696,39 @@ def write_summary(rows, out):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
+    ap.add_argument("--cross", nargs="+", default=None,
+                    help="cross-dataset mode: NAME=path.jsonl pairs at one scale")
+    ap.add_argument("--cross-scale", default="1M", help="scale label for --cross title")
+    ap.add_argument("--cross-scale-lines", nargs="+", default=None,
+                    help="cross-scale line mode: NAME:N=path.jsonl tuples")
+    ap.add_argument("--cross-focus", default="TWO_MERGE",
+                    help="strategy for --cross-scale-lines (default TWO_MERGE)")
     ap.add_argument("--results", nargs="+",
                     default=["results/bigann10k.jsonl", "results/bigann100k.jsonl",
                              "results/bigann1m.jsonl", "results/bigann10m.jsonl"])
     ap.add_argument("--out", default="docs/figures")
     a = ap.parse_args(argv)
+
+    if a.cross:
+        pairs = []
+        for tok in a.cross:
+            if "=" not in tok:
+                print(f"--cross expects NAME=path.jsonl, got {tok!r}"); return
+            name, path = tok.split("=", 1)
+            pairs.append((name, path))
+        fig_cross_dataset(pairs, a.out, a.cross_scale)
+        return
+
+    if a.cross_scale_lines:
+        import collections
+        dsf = collections.defaultdict(dict)
+        for tok in a.cross_scale_lines:
+            # NAME:N=path  e.g. SIFT:100000=results/bigann100k.jsonl
+            head, path = tok.split("=", 1)
+            name, N = head.split(":", 1)
+            dsf[name][int(N)] = path
+        fig_cross_scale(dict(dsf), a.out, a.cross_focus)
+        return
     rows = correct(load(a.results))
     if not rows:
         print("no rows found"); return

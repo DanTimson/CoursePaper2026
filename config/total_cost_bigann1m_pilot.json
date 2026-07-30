@@ -1,0 +1,169 @@
+{
+  "_comment": [
+    "End-to-end single-thread operation-count experiment.",
+    "Leaf indexes are reused from the direct BUILD_ONLY sweep in the same workdir.",
+    "Every P>2 run records each pairwise merge step and deletes intermediate merged files.",
+    "Balanced is the divide-and-conquer tree. Sequential is the large-first chain for equal leaves.",
+    "SIGM is intentionally excluded: it ignores the structures of all but the first leaf, so its honest from-scratch construction path is not P-leaf build + graph merge.",
+    "Pilot omits P=16 for IGTM/CGTM/NGM; the full config later adds only those cached-missing rows."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "dataset": {
+    "name": "bigann1m",
+    "dim": 128,
+    "nb": 1000000,
+    "base": "data/sift_scales/sift1m_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift1m_gt.ivecs"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
+  "threads": 1,
+  "workdir": ".work_bigann1m",
+  "results_path": "results/total_cost_bigann1m.jsonl",
+  "sweep": [
+    {
+      "label": "IGTM tuned",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "CGTM tuned",
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "NGM search_ef=10",
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "label": "HNSW-Merger fixed λ0=4, balanced",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4,
+          "merge_lambda_mode": "fixed"
+        }
+      ]
+    },
+    {
+      "label": "HNSW-Merger fixed λ0=4, large-first",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "sequential"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4,
+          "merge_lambda_mode": "fixed"
+        }
+      ]
+    },
+    {
+      "label": "HNSW-Merger adaptive λ0=4, large-first",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "sequential"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4,
+          "merge_lambda_mode": "adaptive"
+        }
+      ]
+    }
+  ],
+  "cleanup_merged": true
+}

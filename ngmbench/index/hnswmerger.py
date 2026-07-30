@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -190,8 +191,9 @@ class CppParams:
     search_M: int = 40
     search_ef: int = 40
     merge_ef_construction: int = -1  # -1 = inherit from the loaded index
-    merge_lambda: int = 4            # HNSWMerger (TWO_MERGE) forward-search width;
-                                     # paper default 4, keep < 10, never above M
+    merge_lambda: int = 4            # HNSWMerger initial/fixed forward-search width
+    merge_lambda_mode: str = "fixed" # fixed | adaptive (paper multi-index rule)
+    cleanup_merged: bool = False       # preserve old behavior unless a config opts in
 
     def merge_kv(self) -> dict:
         """cfg keys for the merge/insert phase. Harmless for algos that ignore them."""
@@ -208,7 +210,43 @@ class CppParams:
                 "next_step_k": self.next_step_k, "next_step_ef": self.next_step_ef,
                 "search_M": self.search_M, "search_ef": self.search_ef,
                 "merge_ef_construction": self.merge_ef_construction,
-                "merge_lambda": self.merge_lambda}
+                "merge_lambda": self.merge_lambda,
+                "merge_lambda_mode": self.merge_lambda_mode}
+
+
+def adaptive_merge_lambda(
+    lambda0: int,
+    max_lambda: int,
+    current_larger_n: int,
+    initial_larger_n: int,
+) -> int:
+    """Paper-inspired adaptive lambda for a sequence of HNSW-Merger operations.
+
+    Section 7.2 of Jin et al. interpolates linearly in log(index size) between
+    (N0, lambda0) and (max_lambda * N0, max_lambda).  For the P<=16, M=16
+    experiment the reset-after-reaching-M rule is never triggered, so a stateless
+    capped interpolation is sufficient.
+
+    The returned value is rounded to the nearest integer and clamped to
+    [lambda0, max_lambda].
+    """
+    lambda0 = int(lambda0)
+    max_lambda = int(max_lambda)
+    current_larger_n = int(current_larger_n)
+    initial_larger_n = int(initial_larger_n)
+    if lambda0 <= 0:
+        raise ValueError("lambda0 must be positive")
+    if max_lambda <= 0:
+        raise ValueError("max_lambda must be positive")
+    if initial_larger_n <= 0 or current_larger_n <= 0:
+        raise ValueError("index sizes must be positive")
+    if max_lambda <= lambda0 or current_larger_n <= initial_larger_n:
+        return min(lambda0, max_lambda)
+
+    ratio = current_larger_n / initial_larger_n
+    fraction = min(1.0, max(0.0, math.log(ratio) / math.log(max_lambda)))
+    value = lambda0 + (max_lambda - lambda0) * fraction
+    return max(lambda0, min(max_lambda, int(round(value))))
 
 
 # --------------------------------------------------------------------------- #
@@ -275,9 +313,13 @@ class HNSWMergerRunner:
         return parse_exps(self._run(self.p.exps_bin, cfg))
 
     def merge_pair(self, idx_a: str, idx_b: str, method: str,
-                   efs: List[int], total_n: int) -> Tuple[str, Dict]:
+                   efs: List[int], total_n: int,
+                   merge_lambda: Optional[int] = None) -> Tuple[str, Dict]:
         cfg = os.path.join(self.p.workdir, f"merge_{uuid.uuid4().hex[:8]}.cfg")
         save_dir = self.p.workdir
+        merge_kv = self.cp.merge_kv()
+        if merge_lambda is not None:
+            merge_kv["lambda"] = int(merge_lambda)
         _write_kv(cfg, {
             "workload_type": self.workload, "merge_method": method,
             "dim": self.cp.dim, "max_elements": total_n, "nb": total_n,
@@ -288,7 +330,7 @@ class HNSWMergerRunner:
             "groundtruth_filepath": self.p.groundtruth,
             "index_path": f"{idx_a},{idx_b}", "save_path": save_dir,
             "efs_array": ", ".join(str(e) for e in efs),
-            **self.cp.merge_kv(),
+            **merge_kv,
         })
         out = parse_exps(self._run(self.p.exps_bin, cfg), expect_method=method)
         # ./exps saves to save_dir/<method>_<workload>.hnsw (fixed name) -> rename unique
@@ -318,48 +360,145 @@ class HNSWMergerRunner:
             method, method.lower())
         return os.path.join(self.p.workdir, f"{stem}_{self.workload}.hnsw")
 
-    def divide_and_conquer(self, leaves: List[str], method: str, order: str,
-                           total_n: int) -> Dict:
-        """Recursively merge leaves. Intermediate merges use a minimal efs to cut
-        query overhead; only the final merge runs the full efs sweep for recall."""
+    def divide_and_conquer(
+        self,
+        leaves: List[str],
+        method: str,
+        order: str,
+        total_n: int,
+        leaf_sizes: Optional[List[int]] = None,
+    ) -> Dict:
+        """Merge all leaves and retain an auditable record of every pairwise step.
+
+        ``balanced`` is the natural divide-and-conquer tree.  For equal leaves,
+        ``sequential`` is the large-first chain recommended by HNSW-Merger for
+        minimizing total merge work: after the first pair, the growing accumulator
+        is repeatedly merged with one remaining leaf.
+
+        Intermediate merged files are deleted as soon as both have been consumed.
+        Cached leaf indexes are never deleted.
+        """
+        if leaf_sizes is None:
+            leaf_sizes = [total_n // len(leaves)] * len(leaves)
+            leaf_sizes[-1] += total_n - sum(leaf_sizes)
+        if len(leaves) != len(leaf_sizes):
+            raise ValueError("leaves and leaf_sizes must have the same length")
+        if not leaves:
+            raise ValueError("at least one leaf is required")
+
         merge_calc = 0
         merge_seconds = 0.0
         final_curve = None
+        merge_steps: List[Dict] = []
+        initial_larger_n = max(int(n) for n in leaf_sizes)
 
-        def do(a, b, is_final):
+        nodes = [
+            {"path": path, "n": int(size), "temporary": False}
+            for path, size in zip(leaves, leaf_sizes)
+        ]
+
+        def remove_consumed(node: Dict) -> None:
+            if (
+                self.cp.cleanup_merged
+                and node["temporary"]
+                and os.path.exists(node["path"])
+            ):
+                os.remove(node["path"])
+
+        def lambda_for(a: Dict, b: Dict) -> Optional[int]:
+            if method != "TWO_MERGE":
+                return None
+            mode = (self.cp.merge_lambda_mode or "fixed").lower()
+            if mode == "fixed":
+                return int(self.cp.merge_lambda)
+            if mode == "adaptive":
+                return adaptive_merge_lambda(
+                    lambda0=self.cp.merge_lambda,
+                    max_lambda=self.cp.M,
+                    current_larger_n=max(a["n"], b["n"]),
+                    initial_larger_n=initial_larger_n,
+                )
+            raise ValueError(
+                f"unknown merge_lambda_mode={self.cp.merge_lambda_mode!r}; "
+                "expected 'fixed' or 'adaptive'"
+            )
+
+        def do(a: Dict, b: Dict, is_final: bool, level: int, step_index: int) -> Dict:
             nonlocal merge_calc, merge_seconds, final_curve
             efs = self.cp.efs_array if is_final else [self.cp.efs_array[0]]
-            merged, out = self.merge_pair(a, b, method, efs, total_n)
-            merge_calc += out["merge_calc"] or 0
-            merge_seconds += out["merge_seconds"] or 0.0
+            lam = lambda_for(a, b)
+            merged, out = self.merge_pair(
+                a["path"], b["path"], method, efs, total_n,
+                merge_lambda=lam,
+            )
+            step_calc = int(out["merge_calc"] or 0)
+            step_seconds = float(out["merge_seconds"] or 0.0)
+            merge_calc += step_calc
+            merge_seconds += step_seconds
             if is_final:
                 final_curve = out["recall_curve"]
-            return merged
+            merge_steps.append({
+                "step": step_index,
+                "level": level,
+                "left_n": a["n"],
+                "right_n": b["n"],
+                "output_n": a["n"] + b["n"],
+                "merge_calc": step_calc,
+                "merge_seconds": step_seconds,
+                "lambda_used": lam,
+                "is_final": bool(is_final),
+            })
+            remove_consumed(a)
+            remove_consumed(b)
+            return {
+                "path": merged,
+                "n": a["n"] + b["n"],
+                "temporary": True,
+            }
 
+        step_index = 0
         if order == "sequential":
-            acc = leaves[0]
-            for i, nxt in enumerate(leaves[1:], 1):
-                acc = do(acc, nxt, is_final=(i == len(leaves) - 1))
+            acc = nodes[0]
+            for i, nxt in enumerate(nodes[1:], 1):
+                step_index += 1
+                acc = do(
+                    acc, nxt,
+                    is_final=(i == len(nodes) - 1),
+                    level=i - 1,
+                    step_index=step_index,
+                )
             root = acc
         elif order == "balanced":
-            level = list(leaves)
-            while len(level) > 1:
-                nxt = []
-                last_round = (len(level) <= 2)
-                for i in range(0, len(level), 2):
-                    if i + 1 < len(level):
-                        nxt.append(do(level[i], level[i + 1],
-                                      is_final=(last_round and i == 0)))
+            current = list(nodes)
+            level_no = 0
+            while len(current) > 1:
+                next_level = []
+                last_round = len(current) <= 2
+                for i in range(0, len(current), 2):
+                    if i + 1 < len(current):
+                        step_index += 1
+                        next_level.append(do(
+                            current[i], current[i + 1],
+                            is_final=(last_round and i == 0),
+                            level=level_no,
+                            step_index=step_index,
+                        ))
                     else:
-                        nxt.append(level[i])
-                level = nxt
-            root = level[0]
+                        next_level.append(current[i])
+                current = next_level
+                level_no += 1
+            root = current[0]
         else:
             raise ValueError(f"unknown order: {order!r}")
 
-        return {"root": root, "merge_calc": merge_calc,
-                "merge_seconds": merge_seconds, "recall_curve": final_curve}
-    
+        return {
+            "root": root["path"],
+            "merge_calc": merge_calc,
+            "merge_seconds": merge_seconds,
+            "recall_curve": final_curve,
+            "merge_steps": merge_steps,
+        }
+
     def sigm_insert(self, leaf0, lrange, rrange, total_n):
         """SIGM merge step: load leaf0 (resized to total_n) and insert base
         points [lrange, rrange) into it. Requires the experiment.cpp patch."""
@@ -396,9 +535,11 @@ def run_hnswmerger(algo: str, n_parts: int, order: str, paths: Paths,
     build_calc = 0
     build_seconds = 0.0
     leaves: List[str] = []
+    leaf_sizes: List[int] = []
     for (lo, hi) in contiguous_partitions(params.nb, n_parts):
         idx, b = runner.build_leaf(lo, hi)
         leaves.append(idx)
+        leaf_sizes.append(hi - lo)
         build_calc += b["build_calc"] or 0
         build_seconds += b["build_seconds"] or 0.0
 
@@ -421,13 +562,15 @@ def run_hnswmerger(algo: str, n_parts: int, order: str, paths: Paths,
                   "merge_seconds": out["merge_seconds"] or 0.0,
                   "recall_curve": None}
         else:
-            dc = runner.divide_and_conquer(leaves, method, order, total_n=params.nb)
+            dc = runner.divide_and_conquer(
+                leaves, method, order, total_n=params.nb, leaf_sizes=leaf_sizes
+            )
 
     headline = None
     if dc["recall_curve"]:
         headline = max((c["recall"] for c in dc["recall_curve"]
                         if c["recall"] is not None), default=None)
-    return {
+    record = {
         "builder": "hnswmerger", "algo": algo, "n_parts": n_parts,
         "partition_method": "range", "order": order,
         "dim": params.dim, "n": params.nb,
@@ -437,4 +580,18 @@ def run_hnswmerger(algo: str, n_parts: int, order: str, paths: Paths,
         "build_seconds": build_seconds, "merge_seconds": dc["merge_seconds"],
         f"recall@{params.k}": headline,
         "recall_curve": dc["recall_curve"],
+        "merge_steps": dc.get("merge_steps", []),
     }
+    root = dc.get("root")
+    keep_merged = os.environ.get("NGMBENCH_KEEP_MERGED", "").lower() in {
+        "1", "true", "yes", "on"
+    }
+    if (
+        params.cleanup_merged
+        and n_parts > 1
+        and root
+        and not keep_merged
+        and os.path.exists(root)
+    ):
+        os.remove(root)
+    return record
