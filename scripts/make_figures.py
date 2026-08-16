@@ -350,7 +350,7 @@ def fig_cross_dataset(dataset_files, out, scale_label="1M"):
 
     names = list(data)
     nD = len(names)
-    fig, ax = plt.subplots(figsize=(1.7 * nD + 3.5, 4.8))
+    fig, ax = plt.subplots(figsize=(1.6 * nD + 3.0, 4.0), constrained_layout=True)
     x = range(len(merges))
     width = 0.8 / nD
     # a distinct hue per dataset, strategies share the x-axis
@@ -364,19 +364,18 @@ def fig_cross_dataset(dataset_files, out, scale_label="1M"):
         # light value labels so the ~0.05/0.10/0.15/0.50 bands are quantifiable
         for b, v in zip(bars, vals):
             if v > 0:
-                ax.text(b.get_x() + b.get_width() / 2, v + 0.006, f"{v:.2f}",
-                        ha="center", va="bottom", fontsize=5.5, color="#333",
-                        rotation=90)
+                ax.text(b.get_x() + b.get_width() / 2, v + 0.004, f"{v:.2f}",
+                        ha="center", va="bottom", fontsize=5, color="#444")
     ax.axhline(1.0, color="#555", lw=1.0, ls="--", alpha=0.6)
     ax.text(len(merges) - 0.5, 1.01, "Rebuild = 1.0", fontsize=8,
             color="#555", ha="right", va="bottom")
     ax.set_xticks(list(x))
     ax.set_xticklabels([STRATEGY_LABEL[a] for a in merges])
     ax.set_ylabel("merge cost / dataset's own Rebuild cost")
-    ax.set_title(f"Merge cost relative to full rebuild across datasets "
+    ax.set_title(f"Strategy cost relative to full rebuild across datasets "
                  f"({scale_label})")
     ax.legend(title="dataset", fontsize=9)
-    ax.set_ylim(0, max(0.6, max(v for d in data.values() for v in d.values()) * 1.15))
+    ax.set_ylim(0, max(v for d in data.values() for v in d.values()) * 1.10)
     _save(fig, out, "cross_dataset")
 
 
@@ -583,16 +582,285 @@ def fig_merge_cost(rows, out, ds="SIFT1M"):
     _save(fig, out, "merge_cost")
 
 
+
+
+def _cfg_str(algo, params):
+    """Compact config string in the supervisor's convention: j<jump_ef>,l<local_ef>
+    for traversal merges; lambda<n> for HNSW-Merger; l<merge_ef_construction> for
+    insertion. Only the knobs that define the strategy's operating point."""
+    p = params or {}
+    if algo == "TWO_MERGE":
+        lam = p.get("merge_lambda")
+        return f"\u03bb{lam}" if lam is not None else "-"
+    if algo == "SIGM":
+        mec = p.get("merge_ef_construction")
+        return f"l{mec}" if mec not in (None, -1) else "inherit"
+    if algo in ("IGTM", "CGTM", "NGM"):
+        j, l = p.get("jump_ef"), p.get("local_ef")
+        return f"j{j},l{l}" if j is not None and l is not None else "-"
+    return "-"
+
+
+def _rebuild_total(rows):
+    """Monolithic rebuild cost (INSERT, P=1, efc=200) from a row set."""
+    return next((r.get("total_calc") for r in rows
+                 if r.get("algo") == "INSERT" and r.get("n_parts") == 1
+                 and r.get("builder") == "hnswmerger" and _efc_row(r) == 200), None)
+
+
+def _component_at(rows, algo, n_parts, key):
+    """build_calc / merge_calc / total_calc for canonical (algo, n_parts) at efc200."""
+    cands = [r.get(key) for r in rows
+             if r.get("algo") == algo and r.get("n_parts") == n_parts
+             and r.get("builder") == "hnswmerger" and _efc_row(r) == 200
+             and _is_canonical(r) and r.get(key) is not None]
+    return min(cands) if cands else None
+
+
+
+def make_comparison_table(dataset_files, out, target=0.95, scale_label="1M"):
+    """Supervisor-style comparison table (markdown): rows = strategies, column
+    groups = datasets, each showing merge cost (millions of distance comps), d_s
+    at the recall target, and the cfg string. Footer = HNSW-Merger speedup vs
+    the SIGM/rebuild baseline per dataset.
+
+    dataset_files: list of (display_name, jsonl_path).
+    NOTE: merge unit is merge_calc/1e6 (millions). Relabel if the reference
+    paper's unit differs - the raw counts are in the CSV companion.
+    """
+    order = ["SIGM", "NGM", "IGTM", "CGTM", "TWO_MERGE"]
+    label = {"SIGM": "SIGM (rebuild)", "NGM": "NGM", "IGTM": "IGTM",
+             "CGTM": "CGTM", "TWO_MERGE": "HNSW-Merger"}
+    per_ds = {}   # name -> {algo: (merge_M, d_s, cfg)}
+    for name, path in dataset_files:
+        if not os.path.exists(path):
+            print(f"  (table: skip missing {path})"); continue
+        rows = [json.loads(l) for l in open(path) if l.strip()]
+        cell = {}
+        for algo in order:
+            c = _component_at(rows, algo, 2, "merge_calc")
+            if c is None:
+                continue
+            # d_s at target from the canonical row's recall curve
+            canon = [r for r in rows if r.get("algo") == algo and r.get("n_parts") == 2
+                     and _efc_row(r) == 200 and _is_canonical(r)]
+            ds_v = None
+            for r in canon:
+                v = _ds_at_recall(r, target)
+                if v is not None:
+                    ds_v = v; break
+            cfg = _cfg_str(algo, canon[0].get("params") if canon else {})
+            cell[algo] = (c / 1e6, ds_v, cfg)
+        per_ds[name] = cell
+
+    names = [n for n, _ in dataset_files if n in per_ds]
+    # build markdown
+    lines = []
+    head1 = "| Algorithm | " + " | ".join(f"{n} merge | {n} d_s | {n} cfg" for n in names) + " |"
+    sep = "|" + "---|" * (1 + 3 * len(names))
+    lines.append(head1)
+    lines.append(sep)
+    for algo in order:
+        row = [label[algo]]
+        for n in names:
+            cell = per_ds[n].get(algo)
+            if cell:
+                mM, ds_v, cfg = cell
+                row += [f"{mM:.0f}", f"{ds_v:.0f}" if ds_v is not None else "-", cfg]
+            else:
+                row += ["-", "-", "-"]
+        lines.append("| " + " | ".join(row) + " |")
+    # speedup footer: SIGM(rebuild) merge / HNSW-Merger merge
+    foot = ["**HNSW-Merger speedup vs rebuild**"]
+    for n in names:
+        s = per_ds[n].get("SIGM"); h = per_ds[n].get("TWO_MERGE")
+        if s and h and h[0]:
+            foot += [f"**{s[0] / h[0]:.1f}\u00d7**", "", ""]
+        else:
+            foot += ["-", "", ""]
+    lines.append("| " + " | ".join(foot) + " |")
+
+    os.makedirs(out, exist_ok=True)
+    md = os.path.join(out, "comparison_table.md")
+    with open(md, "w") as fh:
+        fh.write(f"Merge cost (millions of distance computations) at {scale_label}, "
+                 f"P=2, canonical config; d_s at recall {target}.\n\n")
+        fh.write("\n".join(lines) + "\n")
+    print(f"  wrote {md}")
+    # CSV companion with raw counts
+    import csv as _csv
+    csvp = os.path.join(out, "comparison_table.csv")
+    with open(csvp, "w", newline="") as fh:
+        w = _csv.writer(fh)
+        w.writerow(["dataset", "algo", "merge_calc_raw", "merge_M", "d_s", "cfg"])
+        for n in names:
+            for algo in order:
+                cell = per_ds[n].get(algo)
+                if cell:
+                    mM, ds_v, cfg = cell
+                    w.writerow([n, algo, int(mM * 1e6), f"{mM:.1f}",
+                                f"{ds_v:.1f}" if ds_v is not None else "", cfg])
+    print(f"  wrote {csvp}")
+
+
+def _ds_at_recall(r, target):
+    """d_s at a recall target from a row's recall_curve (linear interp)."""
+    cur = [(c.get("recall"), c.get("d_s")) for c in (r.get("recall_curve") or [])
+           if c.get("recall") is not None and c.get("d_s") is not None]
+    if len(cur) < 2:
+        return None
+    cur.sort()
+    recs = [c[0] for c in cur]; dss = [c[1] for c in cur]
+    if target <= recs[0]:
+        return dss[0]
+    if target >= recs[-1]:
+        return dss[-1]
+    import bisect
+    i = bisect.bisect_left(recs, target)
+    r0, r1, d0, d1 = recs[i-1], recs[i], dss[i-1], dss[i]
+    return d0 + (d1 - d0) * (target - r0) / (r1 - r0) if r1 != r0 else d0
+
+
+def fig_components_vs_scale(dataset_files, out, algo="TWO_MERGE", n_parts=2):
+    """Figure 1: build / merge / total for a fixed strategy at fixed P, as a
+    fraction of monolithic rebuild, versus dataset size. Shows how the cost
+    DECOMPOSITION moves with scale - the build saving is roughly flat per point
+    while merge grows, so total drifts toward (and past) rebuild = 1.0.
+
+    dataset_files: list of (N:int, jsonl_path) for one dataset across scales.
+    """
+    pts = {"build": [], "merge": [], "total": []}
+    Ns = []
+    for N, path in sorted(dataset_files):
+        if not os.path.exists(path):
+            continue
+        rows = [json.loads(l) for l in open(path) if l.strip()]
+        reb = _rebuild_total(rows)
+        if not reb:
+            continue
+        b = _component_at(rows, algo, n_parts, "build_calc")
+        m = _component_at(rows, algo, n_parts, "merge_calc")
+        t = _component_at(rows, algo, n_parts, "total_calc")
+        if None in (b, m, t):
+            continue
+        Ns.append(N)
+        pts["build"].append(b / reb)
+        pts["merge"].append(m / reb)
+        pts["total"].append(t / reb)
+    if len(Ns) < 2:
+        print("  (skip components_vs_scale: <2 scales)"); return
+    fig, ax = plt.subplots(figsize=(7.0, 4.6), constrained_layout=True)
+    styles = {"build": ("#2e86de", "leaf build"),
+              "merge": ("#d1495b", "merge"),
+              "total": ("#2c3e50", "total")}
+    for comp in ("build", "merge", "total"):
+        col, lab = styles[comp]
+        ax.plot(Ns, pts[comp], "o-", color=col, label=lab,
+                lw=2 if comp == "total" else 1.5)
+    ax.axhline(1.0, color="#7f8c8d", ls="--", lw=1.0, alpha=0.7)
+    ax.text(Ns[-1], 1.01, "rebuild", fontsize=8, color="#7f8c8d", ha="right", va="bottom")
+    ax.set_xscale("log")
+    ax.set_xlabel("dataset size N (log)")
+    ax.set_ylabel("cost / monolithic rebuild cost")
+    ax.set_title(f"{STRATEGY_LABEL.get(algo, algo)} at P={n_parts}: "
+                 f"build/merge/total vs scale")
+    ax.legend(title="component")
+    ax.set_ylim(bottom=0)
+    _save(fig, out, "components_vs_scale")
+
+
+def fig_components_vs_partitions(rows, out, algo="TWO_MERGE", ds="SIFT1M"):
+    """Figure 2: build / merge / total as a fraction of monolithic rebuild, versus
+    partition count P, at a fixed scale. Extends the build-only picture (build
+    fraction falls with P) by overlaying merge (rises with P) and total (their
+    sum) - so the reader sees whether the extra merge from finer partitioning
+    eats the build saving.
+    """
+    reb = _rebuild_total(rows)
+    if not reb:
+        print("  (skip components_vs_partitions: no monolithic baseline)"); return
+    parts = sorted({r["n_parts"] for r in rows
+                    if r.get("builder") == "hnswmerger" and r.get("algo") == algo
+                    and r.get("n_parts", 1) >= 2})
+    if len(parts) < 2:
+        print("  (skip components_vs_partitions: <2 partition counts)"); return
+    series = {"build": [], "merge": [], "total": []}
+    for p in parts:
+        series["build"].append((_component_at(rows, algo, p, "build_calc") or 0) / reb)
+        series["merge"].append((_component_at(rows, algo, p, "merge_calc") or 0) / reb)
+        series["total"].append((_component_at(rows, algo, p, "total_calc") or 0) / reb)
+    fig, ax = plt.subplots(figsize=(7.0, 4.6), constrained_layout=True)
+    styles = {"build": ("#2e86de", "leaf build"),
+              "merge": ("#d1495b", "merge"),
+              "total": ("#2c3e50", "total")}
+    for comp in ("build", "merge", "total"):
+        col, lab = styles[comp]
+        ax.plot(parts, series[comp], "o-", color=col, label=lab,
+                lw=2 if comp == "total" else 1.5)
+    ax.axhline(1.0, color="#7f8c8d", ls="--", lw=1.0, alpha=0.7)
+    ax.text(parts[-1], 1.01, "rebuild", fontsize=8, color="#7f8c8d", ha="right", va="bottom")
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(parts); ax.set_xticklabels([str(p) for p in parts])
+    ax.set_xlabel("number of partitions P")
+    ax.set_ylabel("cost / monolithic rebuild cost")
+    ax.set_title(f"{STRATEGY_LABEL.get(algo, algo)}: build/merge/total vs P ({ds})")
+    ax.legend(title="component")
+    ax.set_ylim(bottom=0)
+    _save(fig, out, "components_vs_partitions")
+
+
+
+def fig_total_scaling(rows, out, ds="SIFT1M"):
+    """Counterpart to fig_partition_scaling: per-strategy TOTAL cost (build+merge)
+    vs partition count, all strategies, with the monolithic rebuild reference.
+    Shows which strategies' totals stay below rebuild as P grows - the
+    build-saving-vs-merge-overhead trade, per strategy, on the absolute axis."""
+    parts = sorted({r["n_parts"] for r in rows
+                    if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
+    fig, (axc, axr) = plt.subplots(1, 2, figsize=(13, 4.4), constrained_layout=True)
+    for algo in MERGE_ALGOS:
+        tc = [next((r["total_calc"] / 1e9 for r in rows if r.get("algo") == algo
+                    and r.get("n_parts") == p and _is_canonical(r)), None) for p in parts]
+        rc = [next((r.get("recall@10") for r in rows if r.get("algo") == algo
+                    and r.get("n_parts") == p), None) for p in parts]
+        prow = next((r for r in rows if r.get("algo") == algo
+                     and r.get("n_parts") == 2), None)
+        cfg = _cfg_str(algo, prow.get("params") if prow else {})
+        axc.plot(parts, tc, "o-", color=COLORS[algo], label=f"{disp(algo)} ({cfg})")
+        if any(v is not None for v in rc):
+            axr.plot(parts, rc, "o-", color=COLORS[algo], label=disp(algo))
+    mono = _rebuild_total(rows)
+    if mono:
+        axc.axhline(mono / 1e9, color="#c0392b", ls=":", lw=1.4, alpha=0.8,
+                    label="monolithic rebuild (P=1)")
+    axc.set_xticks(parts); axc.set_xlabel("partitions")
+    axc.set_ylabel("total distance computations (billions)")
+    axc.set_title("Total cost (build + merge) vs partition count")
+    axc.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, framealpha=0.95)
+    axr.set_xticks(parts); axr.set_xlabel("partitions")
+    axr.set_ylabel("recall@10 (best ef)")
+    axr.set_title("Recall vs partition count")
+    axr.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, framealpha=0.95)
+    fig.suptitle(f"Total construction cost by strategy vs partition count  ({ds})",
+                 fontsize=11)
+    _save(fig, out, "total_scaling")
+
+
 def fig_partition_scaling(rows, out, ds="SIFT1M"):
     parts = sorted({r["n_parts"] for r in rows
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
-    fig, (axc, axr) = plt.subplots(1, 2, figsize=(11, 4.2))
+    fig, (axc, axr) = plt.subplots(1, 2, figsize=(13, 4.4), constrained_layout=True)
     for algo in MERGE_ALGOS:
         mc = [next((r["merge_calc"] / 1e9 for r in rows if r.get("algo") == algo
                     and r.get("n_parts") == p), None) for p in parts]
         rc = [next((r.get("recall@10") for r in rows if r.get("algo") == algo
                     and r.get("n_parts") == p), None) for p in parts]
-        axc.plot(parts, mc, "o-", color=COLORS[algo], label=disp(algo))
+        # config string from the P=2 canonical row for the legend
+        prow = next((r for r in rows if r.get("algo") == algo
+                     and r.get("n_parts") == 2), None)
+        cfg = _cfg_str(algo, prow.get("params") if prow else {})
+        lab = f"{disp(algo)} ({cfg})"
+        axc.plot(parts, mc, "o-", color=COLORS[algo], label=lab)
         # SIGM (and any baseline) has no recall curve -> skip it on the recall axis
         if any(v is not None for v in rc):
             axr.plot(parts, rc, "o-", color=COLORS[algo], label=disp(algo))
@@ -602,12 +870,19 @@ def fig_partition_scaling(rows, out, ds="SIFT1M"):
                 and (r.get("build_calc") or 0) > 0), None)
           for p in parts]
     axc.plot(parts, bc, "k--", marker="s", label="build (shared)", alpha=0.6)
+    # monolithic rebuild (P=1) reference line
+    mono = _rebuild_total(rows)
+    if mono:
+        axc.axhline(mono / 1e9, color="#c0392b", ls=":", lw=1.4, alpha=0.8,
+                    label="monolithic rebuild (P=1)")
     axc.set_xticks(parts); axc.set_xlabel("partitions")
     axc.set_ylabel("distance computations (billions)")
-    axc.set_title("Cost vs partition count"); axc.legend()
+    axc.set_title("Cost vs partition count")
+    axc.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, framealpha=0.95)
     axr.set_xticks(parts); axr.set_xlabel("partitions")
     axr.set_ylabel("recall@10 (best ef)")
-    axr.set_title("Recall vs partition count"); axr.legend()
+    axr.set_title("Recall vs partition count")
+    axr.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, framealpha=0.95)
     fig.suptitle(f"Divide-and-conquer trades more (parallelizable) build for more merge cost and slight recall loss  ({ds})",
                  fontsize=11)
     _save(fig, out, "partition_scaling")
@@ -701,6 +976,12 @@ def main(argv=None):
     ap.add_argument("--cross-scale", default="1M", help="scale label for --cross title")
     ap.add_argument("--cross-scale-lines", nargs="+", default=None,
                     help="cross-scale line mode: NAME:N=path.jsonl tuples")
+    ap.add_argument("--components-scale", nargs="+", default=None,
+                    help="Figure 1: N=path.jsonl tuples for one dataset across scales")
+    ap.add_argument("--components-parts", default=None,
+                    help="Figure 2: single results.jsonl with n_parts sweep")
+    ap.add_argument("--components-algo", default="TWO_MERGE",
+                    help="strategy for the component figures")
     ap.add_argument("--cross-focus", default="TWO_MERGE",
                     help="strategy for --cross-scale-lines (default TWO_MERGE)")
     ap.add_argument("--results", nargs="+",
@@ -729,6 +1010,20 @@ def main(argv=None):
             dsf[name][int(N)] = path
         fig_cross_scale(dict(dsf), a.out, a.cross_focus)
         return
+
+    if a.components_scale:
+        pairs = []
+        for tok in a.components_scale:
+            n, path = tok.split("=", 1)
+            pairs.append((int(n), path))
+        fig_components_vs_scale(pairs, a.out, a.components_algo)
+        return
+
+    if a.components_parts:
+        rows = [json.loads(l) for l in open(a.components_parts) if l.strip()]
+        ds = ds_display(rows[0].get("dataset", "")) if rows else "data"
+        fig_components_vs_partitions(rows, a.out, a.components_algo, ds)
+        return
     rows = correct(load(a.results))
     if not rows:
         print("no rows found"); return
@@ -747,6 +1042,7 @@ def main(argv=None):
         fig_param_sweep(ds_rows, out, ds, n_parts=2)
         fig_merge_cost(ds_rows, out, ds)
         fig_partition_scaling(ds_rows, out, ds)
+        fig_total_scaling(ds_rows, out, ds)
         fig_recall_vs_qps(ds_rows, out, ds)
         fig_recall_vs_ds(ds_rows, out, ds)
         write_summary(ds_rows, out)
