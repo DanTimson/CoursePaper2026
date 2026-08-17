@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "CX-NND-001 prepared overnight job; DO NOT treat as tuned or canonical.",
+    "alpha=60 and all FastKCNA command/fixed-default parameters are explicit.",
+    "pg_type=0 is exploratory raw KNNG; pg_type=2 is published FastHNSW.",
+    "No FastKCNA parameter is claimed equivalent to hnswlib ef_construction=200.",
+    "FastKCNA cost/scan counters are diagnostic only; this writes a new namespace.",
+    "Thread count may be overridden with --threads or NGMBENCH_THREADS."
+  ],
+  "namespace": "fastkcna-exploratory",
+  "tuning_status": "untuned exploratory",
+  "binaries": {
+    "checkout": "$FASTKCNA_ROOT",
+    "build_index": "$FASTKCNA_ROOT/code/build_index",
+    "fvec2lshkit": "$FASTKCNA_ROOT/code/fvec2lshkit"
+  },
+  "dataset": {
+    "name": "sift100k",
+    "dim": 128,
+    "nb": 100000,
+    "base": "data/sift_scales/sift100k_base.fvecs"
+  },
+  "threads": 1,
+  "fastkcna_params": {
+    "pg_type": 2,
+    "K": 500,
+    "L": 500,
+    "S": 12,
+    "R": 100,
+    "iter": 6,
+    "search_L": 80,
+    "search_K": 500,
+    "nsg_R": 16,
+    "step": 10,
+    "loop_i": 2,
+    "alpha": 60,
+    "tau": 0,
+    "nthreads": 1,
+    "controls": 100,
+    "recall": 0.98,
+    "seed": 2024,
+    "delta": 0.002,
+    "massq_S": 10
+  },
+  "workdir": ".fastkcna_work/sift100k",
+  "results_path": "results/fastkcna_exploratory_sift100k.jsonl"
+}

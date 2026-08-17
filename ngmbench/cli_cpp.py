@@ -14,6 +14,7 @@ import hashlib
 import itertools
 import json
 import os
+import time
 
 from .cache import ResultsLog
 from dataclasses import replace
@@ -82,11 +83,24 @@ def main(argv=None):
         if key in done:
             print(f"[{i}/{len(runs)}] skip (cached) {algo} parts={n_parts} {order}")
             continue
+        started = time.perf_counter()
         rec = run_hnswmerger(algo, n_parts, order, paths, p)
+        rec["run_wall_seconds"] = time.perf_counter() - started
         rec["run_key"] = key
         rec["dataset"] = ds["name"]
         rec["params"] = p.merge_id()      # resolved values, defaults included
         rec["threads"] = p.thread
+        # Optional truthful reproducibility metadata for prepared experiments.
+        # Gated so established configs and cached run identities remain unchanged.
+        if "seed_metadata" in conf:
+            rec["seed_metadata"] = conf["seed_metadata"]
+        if "experiment_metadata" in conf:
+            rec["experiment_metadata"] = conf["experiment_metadata"]
+            rec["experiment_config"] = {
+                "dataset": ds, "hnsw": hp, "eval": ev,
+                "workdir": paths.workdir,
+            }
+            rec["config_path"] = os.path.abspath(args.config)
         if label:
             rec["variant"] = label
         rec["exps_sha"] = hashlib.sha1(open(paths.exps_bin, "rb").read()).hexdigest()[:12]

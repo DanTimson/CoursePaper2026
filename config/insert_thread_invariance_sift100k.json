@@ -1,0 +1,85 @@
+{
+  "_comment": [
+    "CX-NND-001 prepared SIFT100K monolithic REBUILD thread-invariance matrix.",
+    "Each P=1 run uses the existing HNSWMerger monolithic path to construct rows 0..100K from an empty HNSW.",
+    "Construction threads vary exactly across 1/2/4/8; thread count is part of the leaf cache key so matrix points cannot reuse one another.",
+    "build_calc and build_seconds preserve the backend canonical construction distance count and wall time.",
+    "The existing P=1 query-only path exposes final recall without modifying HNSWMerger.",
+    "The backend does not expose a seed config; hnswlib's constructor default seed=100 is recorded rather than falsely claimed configurable."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "dataset": {
+    "name": "sift100k-monolithic-rebuild-thread-invariance",
+    "dim": 128,
+    "nb": 100000,
+    "base": "data/sift_scales/sift100k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift100k_gt.ivecs"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 200
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
+  "threads": 1,
+  "seed_metadata": {
+    "value": 100,
+    "source": "hnswlib HierarchicalNSW constructor default",
+    "configurable_by_current_backend": false
+  },
+  "experiment_metadata": {
+    "purpose": "test approximate invariance of monolithic from-empty HNSW construction distance counts and quality under construction parallelism",
+    "construction_method": "REBUILD (P=1 monolithic)",
+    "build_range": [
+      0,
+      100000
+    ],
+    "from_empty": true,
+    "quality_available": true,
+    "quality_source": "existing P=1 query-only evaluation path"
+  },
+  "workdir": ".work_rebuild_thread_invariance_sift100k",
+  "results_path": "results/exploratory_rebuild_thread_invariance_sift100k.jsonl",
+  "sweep": [
+    {
+      "algo": [
+        "REBUILD"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "label": "monolithic REBUILD thread invariance",
+      "params": [
+        {
+          "thread": 1
+        },
+        {
+          "thread": 2
+        },
+        {
+          "thread": 4
+        },
+        {
+          "thread": 8
+        }
+      ]
+    }
+  ]
+}

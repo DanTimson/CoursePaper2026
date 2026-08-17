@@ -160,3 +160,10 @@ The operation-count result and quality result should be reported together.
 Fixed lambda=4 is expected to be the cheapest HNSW-Merger variant, but repeated
 merges may reduce quality. The adaptive large-first variant is the paper-aligned
 multi-index comparison.
+
+## Exploratory FastKCNA backend
+
+The external, non-vendored FastKCNA preparation/runner, tiny compatibility smoke,
+and prepared (not executed) overnight commands are documented in
+[`cpp/FASTKCNA.md`](cpp/FASTKCNA.md). FastKCNA counters remain diagnostic and
+are not canonical CoursePaper2026 distance counts.

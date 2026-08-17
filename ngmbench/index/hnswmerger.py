@@ -273,10 +273,10 @@ class HNSWMergerRunner:
         return r.stdout
 
     def build_leaf(self, lrange: int, rrange: int) -> Tuple[str, Dict]:
-        # M and ef_construction are part of the leaf cache key: leaves built at
-        # different build parameters are distinct artifacts, and each carries its
-        # own build_calc in the sidecar .meta.json.
-        tag = f"_M{self.cp.M}_efc{self.cp.ef_construction}"
+        # M, ef_construction, and construction thread count are part of the leaf
+        # cache key: distinct thread-matrix points must each build from empty, and
+        # each artifact carries its own build_calc in the sidecar .meta.json.
+        tag = f"_M{self.cp.M}_efc{self.cp.ef_construction}_t{self.cp.thread}"
         idx = os.path.join(self.p.workdir, f"leaf_{lrange}_{rrange}{tag}.hnsw")
         meta = idx + ".meta.json"
         if os.path.exists(idx) and os.path.exists(meta):
