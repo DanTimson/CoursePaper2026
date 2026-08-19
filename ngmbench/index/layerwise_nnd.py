@@ -136,15 +136,15 @@ class LayerwiseNNDPaths:
         return obj
 
     def metadata(self) -> dict:
-        accepted_patch = Path("cpp/fastkcna_canonical_distance_accounting.patch").resolve()
         return {
             **self.fastkcna.metadata(),
             "libkgraph": str(self.libkgraph),
             "libkgraph_sha256": sha256_file(self.libkgraph),
             "layerwise_builder": str(self.builder),
             "layerwise_builder_sha256": sha256_file(self.builder),
-            "accepted_nnd002_patch": str(accepted_patch) if accepted_patch.is_file() else None,
-            "accepted_nnd002_patch_sha256": sha256_file(accepted_patch) if accepted_patch.is_file() else None,
+            "accepted_nnd002_patch": None,
+            "accepted_nnd002_patch_sha256": "4146a086d95aa2596f67910cc0e70897c0126298bc9be979e68a0f99ec4f27e6",
+            "accepted_nnd002_patch_retained_in_coursepaper": False,
             "nnd004_external_patch_required": False,
         }
 

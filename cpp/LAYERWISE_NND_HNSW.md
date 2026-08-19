@@ -8,9 +8,12 @@ not presented as a standard industrial constructor and it is not FastHNSW.
 ## Pinned sources and hierarchy audit
 
 The backend is FastKCNA revision
-`e2f2d79d3de92419e7feea2f1a79d9efc5746f1d` after the accepted CX-NND-002
-instrumentation patch `fastkcna_canonical_distance_accounting.patch`.  No
-CX-NND-004 external change is required.
+`e2f2d79d3de92419e7feea2f1a79d9efc5746f1d` with the accepted CX-NND-002
+distance-accounting instrumentation applied. Its historical accepted patch
+SHA-256 is `4146a086d95aa2596f67910cc0e70897c0126298bc9be979e68a0f99ec4f27e6`. The patch artifact is not retained in the canonical
+CoursePaper repository; run metadata records this immutable hash together with
+the hashes of the FastKCNA binaries/library actually used. No CX-NND-004
+external change is required.
 
 Stock hnswlib is the vendored v0.8.0 revision
 `3f3429661187e4c24a490a0f148fc6bc89042b3d`.  Its
@@ -167,7 +170,7 @@ extrapolates.  Layerwise results use the separate
 
 ```
 git checkout e2f2d79d3de92419e7feea2f1a79d9efc5746f1d  # FastKCNA
-# apply CoursePaper cpp/fastkcna_canonical_distance_accounting.patch (CX-NND-002)
+# apply the separately retained accepted CX-NND-002 instrumentation (SHA-256 4146a086d95aa2596f67910cc0e70897c0126298bc9be979e68a0f99ec4f27e6)
 cmake -S /path/to/FastKCNA/code -B /path/to/FastKCNA/code
 cmake --build /path/to/FastKCNA/code -j
 make -C cpp layerwise FASTKCNA_ROOT=/path/to/FastKCNA

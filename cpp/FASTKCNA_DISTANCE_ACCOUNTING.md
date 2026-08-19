@@ -98,16 +98,19 @@ all positive keys are upper levels.  Upstream doubles `nsg_R` internally only
 while building level 0 and restores it afterward; that remains implementation
 behavior and is not reported as another input `M`.
 
-## Reproducible patch and build
+## Accepted patch provenance and build
 
-From a clean pinned checkout:
+The accepted CX-NND-002 instrumentation was validated against clean FastKCNA
+revision `e2f2d79d3de92419e7feea2f1a79d9efc5746f1d`. Its historical patch
+SHA-256 is `4146a086d95aa2596f67910cc0e70897c0126298bc9be979e68a0f99ec4f27e6`.
+
+The patch artifact is not retained in the canonical CoursePaper repository.
+Reproduction from a pristine FastKCNA checkout requires the separately retained
+accepted CX-NND-002 instrumentation matching that SHA-256. Once that
+instrumented checkout is present:
 
 ```bash
-cd /path/to/FastKCNA
-git checkout e2f2d79d3de92419e7feea2f1a79d9efc5746f1d
-git apply --check /path/to/CoursePaper2026/cpp/fastkcna_canonical_distance_accounting.patch
-git apply /path/to/CoursePaper2026/cpp/fastkcna_canonical_distance_accounting.patch
-cd code
+cd /path/to/FastKCNA/code
 cmake .
 cmake --build . -j2
 ```
