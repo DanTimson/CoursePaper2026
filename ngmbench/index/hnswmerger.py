@@ -295,22 +295,32 @@ class HNSWMergerRunner:
         return idx, b
 
     def query_only(self, idx: str, method: str, total_n: int) -> Dict:
-        """Run ./exps on a single index (no merge) purely to get its recall curve.
-        The query/recall loop in experiment.cpp runs regardless of merge_method."""
+        """Run ./exps on an existing single index purely to get its recall curve.
+
+        Upstream's INSERT branch returns before the common query loop. REBUILD
+        with rerun=false is the generic load-existing-index path and falls
+        through to that loop, so use it as an implementation detail regardless
+        of the caller's logical construction method.
+        """
         cfg = os.path.join(self.p.workdir, f"query_{uuid.uuid4().hex[:8]}.cfg")
         _write_kv(cfg, {
-            "workload_type": self.workload, "merge_method": method,
+            "workload_type": self.workload, "merge_method": "REBUILD",
             "dim": self.cp.dim, "max_elements": total_n, "nb": total_n,
             "M": self.cp.M, "ef_construction": self.cp.ef_construction,
             "k": self.cp.k, "kk": self.cp.kk, "nq": self.cp.nq,
-            "iterations": 1, "rerun": "true", "save_index": "false",
+            "iterations": 1, "rerun": "false", "save_index": "false",
             "base_filepath": self.p.base, "query_filepath": self.p.query,
             "groundtruth_filepath": self.p.groundtruth,
             "index_path": idx, "save_path": self.p.workdir,
             "efs_array": ", ".join(str(e) for e in self.cp.efs_array),
             **self.cp.merge_kv(),
         })
-        return parse_exps(self._run(self.p.exps_bin, cfg))
+        out = parse_exps(
+            self._run(self.p.exps_bin, cfg),
+            expect_method="REBUILD",
+        )
+        out["merge_method"] = method
+        return out
 
     def merge_pair(self, idx_a: str, idx_b: str, method: str,
                    efs: List[int], total_n: int,
