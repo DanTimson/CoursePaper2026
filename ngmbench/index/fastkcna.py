@@ -22,6 +22,16 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 
+CANONICAL_RECORD_PREFIX = "COURSEPAPER_DISTANCE_COUNTS "
+CANONICAL_SCHEMA = "coursepaper.fastkcna.distance_counts"
+CANONICAL_VERSION = 1
+CANONICAL_INSTRUMENTATION = "fastkcna-canonical-distance-v1"
+CANONICAL_PHASES = (
+    "knng_candidate", "construction_search", "neighbor_prune",
+    "reverse_repair", "other_construction",
+)
+
+
 DIAGNOSTIC_WARNING = (
     "FastKCNA cost, iteration cost, prune scan_rate, search scan_rate, and "
     "analogous upstream counters are diagnostic/noncanonical. Their accounting "
@@ -333,6 +343,91 @@ def parse_diagnostics(stdout: str, log_path: Path) -> dict:
     }
 
 
+def parse_canonical_distance_counts(
+    stdout: str, *, expected_pg_type: int, expected_nthreads: int,
+) -> dict:
+    """Parse and strictly validate the one canonical backend record."""
+    payloads = [
+        line[len(CANONICAL_RECORD_PREFIX):]
+        for line in stdout.splitlines()
+        if line.startswith(CANONICAL_RECORD_PREFIX)
+    ]
+    if len(payloads) != 1:
+        raise FastKCNAError(
+            "canonical FastKCNA accounting requires exactly one "
+            f"{CANONICAL_RECORD_PREFIX.strip()!r} record; found {len(payloads)}"
+        )
+    try:
+        record = json.loads(payloads[0])
+    except json.JSONDecodeError as exc:
+        raise FastKCNAError(f"malformed canonical FastKCNA accounting JSON: {exc}") from exc
+    if not isinstance(record, dict):
+        raise FastKCNAError("canonical FastKCNA accounting payload must be a JSON object")
+    required = {
+        "schema", "version", "instrumentation", "construction_total",
+        "phase_totals", "layer_totals", "pg_type", "nthreads",
+    }
+    missing = sorted(required - set(record))
+    if missing:
+        raise FastKCNAError(f"canonical FastKCNA accounting fields missing: {missing}")
+    if (
+        record["schema"] != CANONICAL_SCHEMA
+        or type(record["version"]) is not int
+        or record["version"] != CANONICAL_VERSION
+    ):
+        raise FastKCNAError(
+            "unsupported canonical FastKCNA accounting schema/version: "
+            f"{record['schema']!r}/{record['version']!r}"
+        )
+    if record["instrumentation"] != CANONICAL_INSTRUMENTATION:
+        raise FastKCNAError(
+            f"unsupported FastKCNA instrumentation: {record['instrumentation']!r}"
+        )
+
+    def counter(value, field: str) -> int:
+        if type(value) is not int or value < 0:
+            raise FastKCNAError(f"canonical FastKCNA {field} must be a nonnegative integer")
+        return value
+
+    total = counter(record["construction_total"], "construction_total")
+    if type(record["pg_type"]) is not int or record["pg_type"] not in (0, 2):
+        raise FastKCNAError("canonical FastKCNA pg_type must be integer 0 or 2")
+    if record["pg_type"] != expected_pg_type:
+        raise FastKCNAError(
+            f"canonical FastKCNA pg_type mismatch: record={record['pg_type']}, requested={expected_pg_type}"
+        )
+    if type(record["nthreads"]) is not int or record["nthreads"] <= 0:
+        raise FastKCNAError("canonical FastKCNA nthreads must be a positive integer")
+    if record["nthreads"] != expected_nthreads:
+        raise FastKCNAError(
+            f"canonical FastKCNA nthreads mismatch: record={record['nthreads']}, requested={expected_nthreads}"
+        )
+    phases = record["phase_totals"]
+    if not isinstance(phases, dict) or set(phases) != set(CANONICAL_PHASES):
+        raise FastKCNAError(
+            f"canonical FastKCNA phase_totals must contain exactly {list(CANONICAL_PHASES)}"
+        )
+    checked_phases = {name: counter(phases[name], f"phase_totals.{name}") for name in CANONICAL_PHASES}
+    if sum(checked_phases.values()) != total:
+        raise FastKCNAError("canonical FastKCNA phase totals do not sum to construction_total")
+    layers = record["layer_totals"]
+    if not isinstance(layers, dict) or not layers:
+        raise FastKCNAError("canonical FastKCNA layer_totals must be a nonempty object")
+    if any(not isinstance(key, str) or not re.fullmatch(r"0|[1-9][0-9]*", key) for key in layers):
+        raise FastKCNAError("canonical FastKCNA layer keys must be canonical nonnegative decimal strings")
+    checked_layers = {key: counter(value, f"layer_totals.{key}") for key, value in layers.items()}
+    ordered_levels = sorted(int(key) for key in checked_layers)
+    if ordered_levels != list(range(ordered_levels[-1] + 1)):
+        raise FastKCNAError("canonical FastKCNA layer keys must identify contiguous actual levels from 0")
+    if expected_pg_type == 0 and set(checked_layers) != {"0"}:
+        raise FastKCNAError("pg_type=0 canonical accounting must contain only single layer 0")
+    if sum(checked_layers.values()) != total:
+        raise FastKCNAError("canonical FastKCNA layer totals do not sum to construction_total")
+    if "diagnostic_upstream_n_comps" in record:
+        counter(record["diagnostic_upstream_n_comps"], "diagnostic_upstream_n_comps")
+    return record
+
+
 class FastKCNARunner:
     def __init__(self, paths: FastKCNAPaths, workdir: Path):
         self.paths = paths
@@ -348,7 +443,10 @@ class FastKCNARunner:
             *params.command_args(),
         ]
 
-    def run(self, data_path: Path, params: FastKCNAParams, run_id: str, conversion: Optional[dict] = None) -> dict:
+    def run(
+        self, data_path: Path, params: FastKCNAParams, run_id: str,
+        conversion: Optional[dict] = None, *, require_canonical: bool = False,
+    ) -> dict:
         data = Path(data_path).resolve()
         if not data.is_file():
             raise FastKCNAError(f"FastKCNA converted input is missing: {data}")
@@ -378,7 +476,12 @@ class FastKCNARunner:
                 "FastKCNA exited successfully but expected output is missing/empty: " + ", ".join(missing)
             )
         provenance = self.paths.metadata()
-        return {
+        canonical = None
+        if require_canonical:
+            canonical = parse_canonical_distance_counts(
+                proc.stdout, expected_pg_type=params.pg_type, expected_nthreads=params.nthreads,
+            )
+        result = {
             "builder": "fastkcna-exploratory",
             "algorithm": "raw-knng" if params.pg_type == 0 else "fasthnsw",
             "pg_type": params.pg_type,
@@ -401,6 +504,24 @@ class FastKCNARunner:
             "diagnostic_fastkcna_counters": parse_diagnostics(proc.stdout, log),
             "conversion": conversion,
         }
+        if canonical is not None:
+            total = canonical["construction_total"]
+            result.update({
+                "builder": "fastkcna-canonical",
+                "canonical_distance_counts_available": True,
+                "build_calc": total,
+                "merge_calc": 0,
+                "total_calc": total,
+                "distance_counts_by_phase": dict(canonical["phase_totals"]),
+                "distance_counts_by_layer": dict(canonical["layer_totals"]),
+                "counter_schema": {
+                    "schema": canonical["schema"],
+                    "version": canonical["version"],
+                    "instrumentation": canonical["instrumentation"],
+                },
+                "canonical_fastkcna_distance_counts": canonical,
+            })
+        return result
 
 
 def check_fasthnsw_compatibility(

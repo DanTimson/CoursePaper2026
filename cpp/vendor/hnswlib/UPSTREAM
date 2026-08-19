@@ -1,0 +1,5 @@
+Upstream: https://github.com/nmslib/hnswlib
+Revision: 3f3429661187e4c24a490a0f148fc6bc89042b3d
+Tag: v0.8.0
+Source subtree: hnswlib/
+License source: LICENSE at the same revision (Apache License 2.0)

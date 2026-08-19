@@ -165,5 +165,68 @@ multi-index comparison.
 
 The external, non-vendored FastKCNA preparation/runner, tiny compatibility smoke,
 and prepared (not executed) overnight commands are documented in
-[`cpp/FASTKCNA.md`](cpp/FASTKCNA.md). FastKCNA counters remain diagnostic and
-are not canonical CoursePaper2026 distance counts.
+[`cpp/FASTKCNA.md`](cpp/FASTKCNA.md). Uninstrumented upstream counters remain
+diagnostic. Canonical construction accounting is documented in
+[`cpp/FASTKCNA_DISTANCE_ACCOUNTING.md`](cpp/FASTKCNA_DISTANCE_ACCOUNTING.md).
+The separate stock-index Recall@10/exact-search-cost evaluator and prepared
+non-construction final commands are documented in
+[`cpp/FASTHNSW_QUALITY_EVALUATION.md`](cpp/FASTHNSW_QUALITY_EVALUATION.md).
+
+
+## CX-NND-004: literal per-layer NNDescent HNSW
+
+`LayerwiseNNDescentHNSW` (`L-NND-HNSW`) is the untuned literal baseline in
+[`cpp/LAYERWISE_NND_HNSW.md`](cpp/LAYERWISE_NND_HNSW.md).  Build the C++ tools
+against the already instrumented pinned backend first:
+
+```bash
+export FASTKCNA_ROOT=/absolute/path/to/FastKCNA
+make -C cpp layerwise FASTKCNA_ROOT="$FASTKCNA_ROOT"
+make -C cpp fast_hnsw_quality_eval
+```
+
+The corrected stock-semantic SIFT10K smoke (`threads=1`) uses initial
+`M=16` diversification on every layer, with final storage capacities 32/16.
+It produced build total `45,296,135`, phases
+`31,437,698 / 0 / 13,828,040 / 30,397 / 0` in the order candidate,
+construction-search, prune, reverse-repair, other, layer totals
+`41,887,888 / 3,402,217 / 6,024 / 6 / 0`, and occupancies
+`10,000 / 617 / 41 / 3 / 1`.  Index SHA-256 is
+`206f61574c0126e19ab63cc81edbe11ee3200e6af49c2476d0cd1d4e06f35cf3`.
+The Recall@10 / exact `d_s` curve is `(0.89322,250.1038)`,
+`(0.99683,691.0581)`, `(0.99963,1114.3036)`,
+`(0.99994,1776.8142)`, `(0.99997,2772.8303)` for ef
+`10,50,100,200,400`; bracketed `d_s@0.95 = 491.75407655631676`.
+The earlier 32-neighbor initial-selection smoke is superseded.
+
+The following large commands are **prepared for a human and were not run in
+Prime**.  Each construction command is one foreground process and can be
+placed after `prlimit ... --`.  The shell extracts the recorded key only to
+pass that exact key back to quality selection; no transient key is product
+logic.
+
+### SIFT100K
+
+```bash
+export FASTKCNA_ROOT=/absolute/path/to/FastKCNA OMP_NUM_THREADS=1
+.venv/bin/python -m ngmbench.cli_layerwise_nnd \
+  --config config/layerwise_nnd_hnsw_canonical_sift100k.json --threads 1
+BUILD_RESULTS=results/layerwise_nnd_hnsw_canonical_sift100k.jsonl
+RUN_KEY="$(.venv/bin/python -c 'import json,sys; r=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]; m=[x for x in r if x.get("dataset")=="sift100k" and x.get("canonical") is True]; assert m; print(m[-1]["run_key"])' "$BUILD_RESULTS")"
+.venv/bin/python -m ngmbench.cli_layerwise_nnd_quality \
+  --config config/layerwise_nnd_hnsw_quality_sift100k.json \
+  --construction-results "$BUILD_RESULTS" --construction-run-key "$RUN_KEY"
+```
+
+### SIFT1M
+
+```bash
+export FASTKCNA_ROOT=/absolute/path/to/FastKCNA OMP_NUM_THREADS=1
+.venv/bin/python -m ngmbench.cli_layerwise_nnd \
+  --config config/layerwise_nnd_hnsw_canonical_sift1m.json --threads 1
+BUILD_RESULTS=results/layerwise_nnd_hnsw_canonical_sift1m.jsonl
+RUN_KEY="$(.venv/bin/python -c 'import json,sys; r=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]; m=[x for x in r if x.get("dataset")=="sift1m" and x.get("canonical") is True]; assert m; print(m[-1]["run_key"])' "$BUILD_RESULTS")"
+.venv/bin/python -m ngmbench.cli_layerwise_nnd_quality \
+  --config config/layerwise_nnd_hnsw_quality_sift1m.json \
+  --construction-results "$BUILD_RESULTS" --construction-run-key "$RUN_KEY"
+```

@@ -11,12 +11,14 @@ import pytest
 
 from ngmbench.cli_fastkcna import main as cli_main
 from ngmbench.index.fastkcna import (
+    CANONICAL_RECORD_PREFIX,
     DIAGNOSTIC_WARNING,
     FastKCNAError,
     FastKCNAParams,
     FastKCNAPaths,
     FastKCNARunner,
     check_fasthnsw_compatibility,
+    parse_canonical_distance_counts,
     prepare_lshkit,
 )
 
@@ -73,6 +75,20 @@ if "MODE" != "missing":
     pathlib.Path(args["-index_path"]).write_bytes(b"index-output")
     pathlib.Path(args["-log_path"]).write_text("prune scan_rate,0.25,\nsearch scan_rate,0.5,\n")
 print("iteration: 1 recall: 0.8 cost: 1.25")
+if "MODE" == "canonical":
+    record = {
+        "schema": "coursepaper.fastkcna.distance_counts", "version": 1,
+        "instrumentation": "fastkcna-canonical-distance-v1",
+        "construction_total": 15,
+        "diagnostic_upstream_n_comps": 9,
+        "phase_totals": {"knng_candidate": 5, "construction_search": 4,
+                         "neighbor_prune": 3, "reverse_repair": 2,
+                         "other_construction": 1},
+        "layer_totals": {"0": 15} if args["-pg_type"] == "0" else {"0": 11, "1": 4},
+        "pg_type": int(args["-pg_type"]), "nthreads": int(args["-nthreads"]),
+    }
+    import json
+    print("COURSEPAPER_DISTANCE_COUNTS " + json.dumps(record, separators=(",", ":")))
 print("diagnostic stderr", file=sys.stderr)
 '''.replace("MODE", builder_mode)
     executable(code / "build_index", builder)
@@ -195,6 +211,76 @@ def test_result_metadata_and_diagnostic_accounting_boundary(tmp_path):
         assert forbidden not in result
 
 
+def canonical_line(pg_type: int = 2, threads: int = 4) -> str:
+    record = {
+        "schema": "coursepaper.fastkcna.distance_counts", "version": 1,
+        "instrumentation": "fastkcna-canonical-distance-v1",
+        "construction_total": 10,
+        "phase_totals": {"knng_candidate": 2, "construction_search": 2,
+                         "neighbor_prune": 2, "reverse_repair": 2,
+                         "other_construction": 2},
+        "layer_totals": {"0": 7, "1": 3} if pg_type == 2 else {"0": 10},
+        "pg_type": pg_type, "nthreads": threads,
+    }
+    return CANONICAL_RECORD_PREFIX + json.dumps(record)
+
+
+def test_strict_canonical_record_parser_and_invariants():
+    parsed = parse_canonical_distance_counts(
+        "human prose\n" + canonical_line() + "\nmore prose\n",
+        expected_pg_type=2, expected_nthreads=4,
+    )
+    assert parsed["construction_total"] == 10
+    for stdout, match in [
+        ("no record", "exactly one"),
+        (canonical_line() + "\n" + canonical_line(), "exactly one"),
+        (CANONICAL_RECORD_PREFIX + "{bad", "malformed"),
+    ]:
+        with pytest.raises(FastKCNAError, match=match):
+            parse_canonical_distance_counts(stdout, expected_pg_type=2, expected_nthreads=4)
+    base = json.loads(canonical_line().split(" ", 1)[1])
+    mutations = [
+        ("construction_total", True, "nonnegative integer"),
+        ("construction_total", 11, "phase totals"),
+        ("pg_type", 0, "pg_type mismatch"),
+        ("nthreads", 3, "nthreads mismatch"),
+    ]
+    for field, value, match in mutations:
+        bad = dict(base); bad[field] = value
+        with pytest.raises(FastKCNAError, match=match):
+            parse_canonical_distance_counts(
+                CANONICAL_RECORD_PREFIX + json.dumps(bad),
+                expected_pg_type=2, expected_nthreads=4,
+            )
+    bad = dict(base); bad["phase_totals"] = dict(base["phase_totals"]); bad["phase_totals"].pop("reverse_repair")
+    with pytest.raises(FastKCNAError, match="phase_totals"):
+        parse_canonical_distance_counts(CANONICAL_RECORD_PREFIX + json.dumps(bad), expected_pg_type=2, expected_nthreads=4)
+    bad = dict(base); bad["layer_totals"] = {"0": 6, "1": 3}
+    with pytest.raises(FastKCNAError, match="layer totals"):
+        parse_canonical_distance_counts(CANONICAL_RECORD_PREFIX + json.dumps(bad), expected_pg_type=2, expected_nthreads=4)
+
+
+def test_canonical_runner_maps_exact_total_and_requires_record(tmp_path):
+    checkout = fake_checkout(tmp_path, builder_mode="canonical")
+    data, conversion = prepared(tmp_path, checkout)
+    for pg in (0, 2):
+        result = FastKCNARunner(paths(checkout), tmp_path / f"runs{pg}").run(
+            data, params(pg), f"canonical-{pg}", conversion, require_canonical=True,
+        )
+        assert result["builder"] == "fastkcna-canonical"
+        assert result["canonical_distance_counts_available"] is True
+        assert (result["build_calc"], result["merge_calc"], result["total_calc"]) == (15, 0, 15)
+        assert sum(result["distance_counts_by_phase"].values()) == 15
+        assert sum(result["distance_counts_by_layer"].values()) == 15
+        assert result["canonical_fastkcna_distance_counts"]["diagnostic_upstream_n_comps"] == 9
+    old_checkout = fake_checkout(tmp_path / "old")
+    old_data, old_conversion = prepared(tmp_path / "old", old_checkout)
+    with pytest.raises(FastKCNAError, match="exactly one"):
+        FastKCNARunner(paths(old_checkout), tmp_path / "old-runs").run(
+            old_data, params(), "missing-counter", old_conversion, require_canonical=True,
+        )
+
+
 @pytest.mark.parametrize("mode, message", [("fail", "build failed.*exit=9"), ("missing", "expected output is missing")])
 def test_builder_failure_and_missing_output_are_explicit(tmp_path, mode, message):
     checkout = fake_checkout(tmp_path, builder_mode=mode)
@@ -228,6 +314,33 @@ def test_cli_writes_only_new_fastkcna_namespace(tmp_path, monkeypatch):
     assert record["namespace"] == "fastkcna-exploratory"
     assert "build_calc" not in record
     assert canonical.read_text() == '{"sentinel": true}\n'
+
+
+def test_canonical_cli_uses_separate_namespace_and_refuses_cross_mode_path(tmp_path):
+    checkout = fake_checkout(tmp_path, builder_mode="canonical")
+    source = fvecs(tmp_path / "tiny.fvecs")
+    result_path = tmp_path / "results/fastkcna_canonical_tiny.jsonl"
+    config = {
+        "namespace": "fastkcna-canonical", "tuning_status": "untuned",
+        "binaries": {"checkout": str(checkout)},
+        "dataset": {"name": "tiny", "dim": 3, "nb": 4, "base": str(source)},
+        "threads": 1, "fastkcna_params": params(0, 1).complete_metadata(),
+        "workdir": str(tmp_path / "work"), "results_path": str(result_path),
+    }
+    config["fastkcna_params"] = {key: value for key, value in config["fastkcna_params"].items() if key not in {
+        "fixed_upstream_defaults", "tuning_status", "hnswlib_ef_construction_equivalence"
+    }}
+    config_path = tmp_path / "canonical.json"
+    config_path.write_text(json.dumps(config))
+    assert cli_main(["--config", str(config_path)]) == 0
+    record = json.loads(result_path.read_text())
+    assert record["namespace"] == "fastkcna-canonical"
+    assert record["build_calc"] == record["total_calc"] == 15
+    assert record["merge_calc"] == 0
+    config["results_path"] = str(tmp_path / "results/fastkcna_exploratory_tiny.jsonl")
+    config_path.write_text(json.dumps(config))
+    with pytest.raises(FastKCNAError, match="separate"):
+        cli_main(["--config", str(config_path)])
 
 
 def test_compatibility_smoke_records_success_or_exact_rejection(tmp_path):
@@ -304,6 +417,12 @@ def test_prepared_configs_cover_overnight_and_thread_matrix():
             assert cfg["fastkcna_params"]["nsg_R"] == 16
             assert cfg["tuning_status"] == "untuned exploratory"
             assert "fastkcna" in Path(cfg["results_path"]).name
+            canonical_cfg = json.loads((ROOT / "config" / f"fastkcna_canonical_{scale}_pg{pg}.json").read_text())
+            assert canonical_cfg["namespace"] == "fastkcna-canonical"
+            assert canonical_cfg["dataset"]["nb"] == nb
+            assert canonical_cfg["fastkcna_params"] == cfg["fastkcna_params"]
+            assert canonical_cfg["tuning_status"] == "untuned"
+            assert "fastkcna_canonical" in Path(canonical_cfg["results_path"]).name
     matrix = json.loads((ROOT / "config/insert_thread_invariance_sift100k.json").read_text())
     spec = matrix["sweep"][0]
     assert spec["algo"] == ["REBUILD"] and spec["n_parts"] == [1]

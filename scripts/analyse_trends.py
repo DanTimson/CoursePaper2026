@@ -37,6 +37,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ngmbench.quality import ds_at_recall
+
 STRAT_LABEL = {"TWO_MERGE": "HNSWMerger", "IGTM": "IGTM", "CGTM": "CGTM",
                "NGM": "NGM", "SIGM": "SIGM", "INSERT": "Rebuild"}
 COLORS = {"NGM": "#d1495b", "IGTM": "#2e86de", "CGTM": "#16a085",
@@ -62,21 +64,7 @@ def scale_of(name):
 
 
 def ds_at(r, target):
-    cur = [(c.get("recall"), c.get("d_s")) for c in (r.get("recall_curve") or [])
-           if c.get("recall") is not None and c.get("d_s") is not None]
-    if len(cur) < 2:
-        return None
-    cur.sort()
-    recs, dss = [c[0] for c in cur], [c[1] for c in cur]
-    if target < recs[0] or target > recs[-1]:
-        return None
-    import bisect
-    i = bisect.bisect_left(recs, target)
-    if i == 0:
-        return dss[0]
-    r0, r1, d0, d1 = recs[i-1], recs[i], dss[i-1], dss[i]
-    return d1 if r1 == r0 else d0 + (d1 - d0) * (target - r0) / (r1 - r0)
-
+    return ds_at_recall(r.get("recall_curve"), target)
 
 def _p(r, key, default=None):
     return (r.get("params") or {}).get(key, default)
@@ -92,11 +80,10 @@ def _efc(r):
 
 
 def _dss(r, target):
-    """d_s@target from curve, else fall back to a stored d_s@0.95 field."""
-    v = ds_at(r, target)
-    if v is not None:
-        return v
-    return r.get("d_s@0.95")
+    """d_s@target from a curve, with a legacy 0.95-only stored fallback."""
+    if r.get("recall_curve"):
+        return ds_at(r, target)
+    return r.get("d_s@0.95") if target == 0.95 else None
 
 
 def _save(fig, out, name):

@@ -6,9 +6,9 @@ vendor_repo/
 HNSWMerger/
 
 # --- experiment caches & scratch (regenerable) ---
-.hnswmerger_work*/
 .work_*/
-.fastkcna_work*/
+# Local/generated benchmark work directories
+.*_work*/
 .ngmbench_cache*/
 *.pkl
 *.cfg
@@ -19,6 +19,10 @@ dumps/
 cpp/exps
 cpp/builds
 cpp/dump_graph
+cpp/fast_hnsw_quality_eval
+cpp/fast_hnsw_query_counter_test
+cpp/layerwise_nnd_hnsw_builder
+cpp/layerwise_nnd_hnsw_validate
 *.o
 
 # --- local env (machine-specific paths; copy from .env.example) ---

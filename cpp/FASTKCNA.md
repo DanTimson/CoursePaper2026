@@ -90,14 +90,28 @@ terminate called after throwing an instance of 'std::runtime_error'
 Therefore the current evaluator format is incompatible with the FastKCNA
 output.  No ad-hoc conversion is performed.
 
+CX-NND-003 therefore uses a separate pinned stock-hnswlib reader and leaves both
+serializations untouched.  See
+[`FASTHNSW_QUALITY_EVALUATION.md`](FASTHNSW_QUALITY_EVALUATION.md) for exact query
+metric counting, Recall@10/`d_s` equivalence, bounded validation, and the
+prepared evaluation-only commands.
+
 ## Accounting boundary
 
-FastKCNA `cost`/iteration cost, `prune scan_rate`, `search scan_rate`, pruning
-or search cost, and analogous upstream counters are stored only below
-`diagnostic_fastkcna_counters`, with an explicit noncanonical warning.  Their
-units/accounting have not been reconciled with CoursePaper2026's patched
-HNSWMerger distance calls.  They are never mapped to `build_calc`, `merge_calc`,
-or `total_calc`.
+Unmodified FastKCNA remains available only through the explicit
+`fastkcna-exploratory` namespace.  Its `cost`, `prune scan_rate`, `search
+scan_rate`, and analogous upstream counters remain diagnostic and are never
+mapped to `build_calc`.
+
+CX-NND-002 adds a reproducible canonical counter patch for the pinned revision.
+See [`FASTKCNA_DISTANCE_ACCOUNTING.md`](FASTKCNA_DISTANCE_ACCOUNTING.md) for the
+complete source audit, exact semantics, patch apply/rebuild commands, and
+bounded validation.  Counted jobs use only the separate `fastkcna-canonical`
+namespace and `results/fastkcna_canonical_*.jsonl` paths.  The adapter requires
+and validates the prefixed backend JSON record before mapping its exact total
+to `build_calc` and `total_calc` (`merge_calc=0`).  An uninstrumented or malformed
+backend is a hard error in that mode; exploratory mode is not promoted even if
+the executable happens to be instrumented.
 
 ## Monolithic REBUILD thread-invariance preparation
 

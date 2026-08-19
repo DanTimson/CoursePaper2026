@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Prepared only: evaluate the already-built canonical FastKCNA pg_type=2 index; never rebuild.",
+    "Pass --construction-results and --construction-run-key explicitly in final commands for auditable selection."
+  ],
+  "namespace": "fasthnsw-quality",
+  "binaries": {
+    "evaluator": "cpp/fast_hnsw_quality_eval"
+  },
+  "construction": {
+    "results_path": "results/fastkcna_canonical_sift1m.jsonl",
+    "run_key": "ee2470d409d0"
+  },
+  "dataset": {
+    "name": "sift1m",
+    "dim": 128,
+    "nb": 1000000,
+    "base": "data/sift_scales/sift1m_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift1m_gt.ivecs",
+    "analysis_name": "bigann1m"
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ],
+    "identity_samples": 8
+  },
+  "workdir": ".fasthnsw_quality_work/sift1m",
+  "results_path": "results/fasthnsw_quality_sift1m.jsonl"
+}

@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Evaluate only an explicitly selected LayerwiseNNDescentHNSW construction record.",
+    "Override the placeholder run key with --construction-run-key from the construction output."
+  ],
+  "namespace": "layerwise-nnd-hnsw-quality",
+  "binaries": {
+    "evaluator": "cpp/fast_hnsw_quality_eval"
+  },
+  "construction": {
+    "results_path": "results/layerwise_nnd_hnsw_canonical_sift10k.jsonl",
+    "run_key": "OVERRIDE_WITH_EXPLICIT_CONSTRUCTION_RUN_KEY"
+  },
+  "dataset": {
+    "name": "sift10k",
+    "dim": 128,
+    "nb": 10000,
+    "base": "data/sift_scales/sift10k_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift10k_gt.ivecs",
+    "analysis_name": "bigann10k"
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ],
+    "identity_samples": 8
+  },
+  "workdir": ".layerwise_nnd_hnsw_quality_work/sift10k",
+  "results_path": "results/layerwise_nnd_hnsw_quality_sift10k.jsonl"
+}

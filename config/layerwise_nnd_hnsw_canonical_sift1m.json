@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "CX-NND-004 literal independent-per-layer NNDescent HNSW baseline.",
+    "Frozen untuned parameters; canonical construction threads=1."
+  ],
+  "namespace": "layerwise-nnd-hnsw-canonical",
+  "tuning_status": "untuned canonical",
+  "binaries": {
+    "checkout": "$FASTKCNA_ROOT",
+    "build_index": "$FASTKCNA_ROOT/code/build_index",
+    "fvec2lshkit": "$FASTKCNA_ROOT/code/fvec2lshkit",
+    "libkgraph": "$FASTKCNA_ROOT/code/libkgraph.a",
+    "layerwise_builder": "cpp/layerwise_nnd_hnsw_builder"
+  },
+  "dataset": {
+    "name": "sift1m",
+    "dim": 128,
+    "nb": 1000000,
+    "base": "data/sift_scales/sift1m_base.fvecs"
+  },
+  "candidate_parameters": {
+    "K": 500,
+    "L": 500,
+    "S": 12,
+    "R": 100,
+    "iter": 6,
+    "seed": 2024,
+    "delta": 0.002,
+    "controls": 100,
+    "recall": 0.98,
+    "M": 16,
+    "threads": 1
+  },
+  "workdir": ".layerwise_nnd_hnsw_work/sift1m",
+  "results_path": "results/layerwise_nnd_hnsw_canonical_sift1m.jsonl"
+}

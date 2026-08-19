@@ -26,28 +26,36 @@ def _run_key(value: dict) -> str:
     return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def _safe_results_path(value: str) -> Path:
+def _safe_results_path(value: str, namespace: str) -> Path:
     path = Path(os.path.expandvars(os.path.expanduser(value))).resolve()
     if "$" in str(path):
         raise FastKCNAError(f"results_path contains an unresolved environment variable: {value!r}")
-    if "fastkcna" not in path.name.lower() or path.suffix != ".jsonl":
+    required_token = {
+        "fastkcna-exploratory": "fastkcna_exploratory",
+        "fastkcna-canonical": "fastkcna_canonical",
+    }[namespace]
+    if path.suffix != ".jsonl" or required_token not in path.name.lower():
         raise FastKCNAError(
-            "FastKCNA results must use a new, explicit *fastkcna*.jsonl namespace; "
+            f"{namespace} results must use a separate *{required_token}*.jsonl namespace; "
             f"refusing results_path={value!r}"
         )
     return path
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="External FastKCNA exploratory runner")
+    parser = argparse.ArgumentParser(description="External FastKCNA exploratory/canonical runner")
     parser.add_argument("--config", required=True)
     parser.add_argument("--threads", type=int, help="override config threads/nthreads")
     args = parser.parse_args(argv)
 
     config_path = Path(args.config).resolve()
     conf = json.loads(config_path.read_text())
-    if conf.get("namespace") != "fastkcna-exploratory":
-        raise FastKCNAError("config namespace must be exactly 'fastkcna-exploratory'")
+    namespace = conf.get("namespace")
+    if namespace not in ("fastkcna-exploratory", "fastkcna-canonical"):
+        raise FastKCNAError(
+            "config namespace must be exactly 'fastkcna-exploratory' or 'fastkcna-canonical'"
+        )
+    require_canonical = namespace == "fastkcna-canonical"
     paths = FastKCNAPaths.resolve(conf.get("binaries", {}))
     provenance = paths.metadata()
 
@@ -68,7 +76,7 @@ def main(argv=None) -> int:
     params = FastKCNAParams(**params_dict)
 
     workdir = Path(os.path.expandvars(os.path.expanduser(conf.get("workdir", ".fastkcna_work")))).resolve()
-    results_path = _safe_results_path(conf["results_path"])
+    results_path = _safe_results_path(conf["results_path"], namespace)
     results_path.parent.mkdir(parents=True, exist_ok=True)
     results = ResultsLog(str(results_path))
     identity = {
@@ -88,14 +96,16 @@ def main(argv=None) -> int:
     converted = workdir / "converted" / f"{dataset['name']}.lshkit"
     conversion = prepare_lshkit(Path(source["path"]), converted, paths)
     runner = FastKCNARunner(paths, workdir / "runs")
-    record = runner.run(converted, params, key, conversion=conversion)
+    record = runner.run(
+        converted, params, key, conversion=conversion, require_canonical=require_canonical,
+    )
     record.update({
         "run_key": key,
         "namespace": conf["namespace"],
         "dataset": dataset["name"],
         "dataset_source": source,
         "config_path": str(config_path),
-        "tuning_status": "untuned exploratory",
+        "tuning_status": conf.get("tuning_status", "untuned exploratory"),
     })
     results.append(record)
     print(

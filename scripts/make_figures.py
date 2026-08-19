@@ -40,6 +40,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from ngmbench.quality import ds_at_recall
+
 NQ_BY_DATASET = {"sift1m": 10000, "gist1m": 1000}  # query-set sizes, for QPS = nq / query_seconds
 
 
@@ -60,7 +62,8 @@ def disp(algo: str) -> str:
 TRUE_MERGE = {"NGM", "IGTM", "CGTM", "ES", "TWO_MERGE"}
 COLORS = {"NGM": "#d1495b", "IGTM": "#2e86de", "CGTM": "#16a085",
           "ES": "#e67e22", "TWO_MERGE": "#8e44ad", "INSERT": "#7f8c8d",
-          "SIGM": "#34495e", "NNDescent": "#27ae60"}   # SIGM slate: distinct from NGM red and Rebuild grey
+          "SIGM": "#34495e", "NNDescent": "#27ae60", "FastHNSW": "#f39c12",
+          "L-NND-HNSW": "#9b59b6"}   # SIGM slate: distinct from NGM red and Rebuild grey
 BUILD_GRAY = "#d5d8dc"
 
 
@@ -173,30 +176,8 @@ def _pid(r) -> str:
 
 
 def _ds_at_recall(r, target):
-    """Interpolate search distance computations per query at a target recall.
-
-    Returns None if the row's curve never reaches `target` — a config that
-    cannot hit the target quality has no iso-quality point and must not be
-    silently plotted at its best-effort value.
-    """
-    cur = [(c.get("recall"), c.get("d_s")) for c in (r.get("recall_curve") or [])
-           if c.get("recall") is not None and c.get("d_s") is not None]
-    if len(cur) < 2:
-        return None
-    cur.sort()
-    recs = [c[0] for c in cur]
-    dss = [c[1] for c in cur]
-    if target < recs[0] or target > recs[-1]:
-        return None
-    import bisect
-    i = bisect.bisect_left(recs, target)
-    if i == 0:
-        return dss[0]
-    r0, r1, d0, d1 = recs[i - 1], recs[i], dss[i - 1], dss[i]
-    if r1 == r0:
-        return d1
-    return d0 + (d1 - d0) * (target - r0) / (r1 - r0)
-
+    """Interpolate search distance computations per query at a target recall."""
+    return ds_at_recall(r.get("recall_curve"), target)
 
 def fig_iso_quality(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
     """Merge cost at MATCHED search quality — the comparison the paper's table makes.
@@ -703,24 +684,6 @@ def make_comparison_table(dataset_files, out, target=0.95, scale_label="1M"):
     print(f"  wrote {csvp}")
 
 
-def _ds_at_recall(r, target):
-    """d_s at a recall target from a row's recall_curve (linear interp)."""
-    cur = [(c.get("recall"), c.get("d_s")) for c in (r.get("recall_curve") or [])
-           if c.get("recall") is not None and c.get("d_s") is not None]
-    if len(cur) < 2:
-        return None
-    cur.sort()
-    recs = [c[0] for c in cur]; dss = [c[1] for c in cur]
-    if target <= recs[0]:
-        return dss[0]
-    if target >= recs[-1]:
-        return dss[-1]
-    import bisect
-    i = bisect.bisect_left(recs, target)
-    r0, r1, d0, d1 = recs[i-1], recs[i], dss[i-1], dss[i]
-    return d0 + (d1 - d0) * (target - r0) / (r1 - r0) if r1 != r0 else d0
-
-
 def fig_components_vs_scale(dataset_files, out, algo="TWO_MERGE", n_parts=2):
     """Figure 1: build / merge / total for a fixed strategy at fixed P, as a
     fraction of monolithic rebuild, versus dataset size. Shows how the cost
@@ -888,10 +851,24 @@ def fig_partition_scaling(rows, out, ds="SIFT1M"):
     _save(fig, out, "partition_scaling")
 
 
+def _qps_curve_peer(r, n_parts=2):
+    """Rows with query-only timing comparable on the existing QPS axis."""
+    return bool(r.get("recall_curve")) and (
+        r.get("builder") == "hnswmerger" and r.get("n_parts") == n_parts
+    )
+
+
+def _ds_curve_peer(r, n_parts=2):
+    """Rows sharing the canonical Recall/d_s curve semantics."""
+    return bool(r.get("recall_curve")) and (
+        (r.get("builder") == "hnswmerger" and r.get("n_parts") == n_parts)
+        or r.get("namespace") in {"fasthnsw-quality", "layerwise-nnd-hnsw-quality"}
+    )
+
+
 def fig_recall_vs_qps(rows, out, ds="SIFT1M", n_parts=2):
     fig, ax = plt.subplots(figsize=(7, 4.6))
-    methods = [r for r in rows if r.get("builder") == "hnswmerger"
-               and r.get("n_parts") == n_parts and r.get("recall_curve")]
+    methods = [r for r in rows if _qps_curve_peer(r, n_parts)]
     order = ["IGTM", "CGTM", "NGM", "ES", "TWO_MERGE"]
     methods.sort(key=lambda r: order.index(r["algo"]) if r["algo"] in order else 99)
     for r in methods:
@@ -929,14 +906,13 @@ def _plabel(r) -> str:
 def fig_recall_vs_ds(rows, out, ds="SIFT1M", n_parts=2):
     """Search quality vs search COST on the distance-computation axis: recall@10
     against d_s (search distance computations per query). The implementation-
-    independent companion to fig_recall_vs_qps - same curves, but x is work done
-    rather than wall-clock throughput, so it is not confounded by threading or
-    the C++/Python split. NN-Descent is omitted: its search is not d_s-
+    independent companion to fig_recall_vs_qps: x is work done rather than
+    wall-clock throughput, so it can include exactly counted curves without
+    comparable query-only timing. NN-Descent is omitted: its search is not d_s-
     instrumented, and it was never a controlled time comparison either."""
     fig, ax = plt.subplots(figsize=(7, 4.6))
-    methods = [r for r in rows if r.get("builder") == "hnswmerger"
-               and r.get("n_parts") == n_parts and r.get("recall_curve")]
-    order = ["TWO_MERGE", "IGTM", "CGTM", "NGM", "ES"]
+    methods = [r for r in rows if _ds_curve_peer(r, n_parts)]
+    order = ["FastHNSW", "L-NND-HNSW", "TWO_MERGE", "IGTM", "CGTM", "NGM", "ES"]
     methods.sort(key=lambda r: order.index(r["algo"]) if r["algo"] in order else 99)
     drawn = 0
     for r in methods:
@@ -1030,7 +1006,7 @@ def main(argv=None):
 
     by_ds = defaultdict(list)
     for r in rows:
-        by_ds[r.get("dataset") or "unknown"].append(r)
+        by_ds[r.get("analysis_dataset") or r.get("dataset") or "unknown"].append(r)
 
     for ds_key, ds_rows in sorted(by_ds.items()):
         ds = ds_display(ds_key)
