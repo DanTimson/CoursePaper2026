@@ -1,0 +1,36 @@
+=== REPOSITORY ===
+/home/remotedt/HNSWMerger/HNSW-Merger
+origin	https://github.com/Kimchuls/HNSWMerger.git (fetch)
+origin	https://github.com/Kimchuls/HNSWMerger.git (push)
+
+=== LOCAL HEAD ===
+88f6b7179f651cf5f284bd4e52249a4b1323b5af
+88f6b71 (HEAD -> main, origin/main, origin/HEAD) update README.md
+
+=== ORIGIN/MAIN ===
+88f6b7179f651cf5f284bd4e52249a4b1323b5af
+88f6b71 update README.md
+
+=== STATUS ===
+ M experiment.cpp
+ M test_config.h
+?? builds
+?? c_density_100k.csv
+?? c_leaf.csv
+?? dump_graph
+?? dump_graph_level0.cpp
+?? dumps/
+?? exps
+?? ../merge_params_and_ds.patch
+?? ../patch_hnswmerger_cohere.py
+?? ../sigm_insert_min.patch
+?? ../test_config_params.patch
+
+=== UNTRACKED FILES ===
+builds
+c_density_100k.csv
+c_leaf.csv
+dump_graph
+dump_graph_level0.cpp
+dumps/INSERT_100k.csv
+exps

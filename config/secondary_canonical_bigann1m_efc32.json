@@ -1,0 +1,189 @@
+{
+  "_comment": [
+    "SIFT1M / BIGANN1M P=2 secondary-canonical and supervisor-table parity sweep at ef_construction=32.",
+    "Our secondary canonical keeps the same algorithm knobs as the efc=200 canonical.",
+    "Extra HNSWMerger lambda=10 and SIGM merge_ef_construction=48 rows are included only as",
+    "supervisor-table parity points; they are not promoted to our canonical defaults.",
+    "Elastic/ES is intentionally omitted until the supervisor table's cfg l64 is mapped unambiguously."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "dataset": {
+    "name": "bigann1m",
+    "dim": 128,
+    "nb": 1000000,
+    "base": "data/sift_scales/sift1m_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift1m_gt.ivecs"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 32
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
+  "threads": 1,
+  "workdir": ".work_bigann1m",
+  "results_path": "results/secondary_canonical_bigann1m_efc32.jsonl",
+  "experiment_metadata": {
+    "track": "secondary-canonical-efc32",
+    "purpose": "P=2 canonical cross-check and supervisor-table parity"
+  },
+  "sweep": [
+    {
+      "label": "secondary canonical NGM search_ef=10",
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "label": "secondary canonical IGTM j5,l7",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "secondary canonical CGTM j15,l5",
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "secondary canonical HNSWMerger lambda=4",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4,
+          "merge_lambda_mode": "fixed"
+        }
+      ]
+    },
+    {
+      "label": "supervisor parity HNSWMerger lambda=10",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 10,
+          "merge_lambda_mode": "fixed"
+        }
+      ]
+    },
+    {
+      "label": "secondary canonical SIGM inherit efc32",
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": -1
+        }
+      ]
+    },
+    {
+      "label": "supervisor parity SIGM j48",
+      "algo": [
+        "SIGM"
+      ],
+      "n_parts": [
+        2
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_ef_construction": 48
+        }
+      ]
+    },
+    {
+      "label": "secondary canonical monolithic INSERT",
+      "algo": [
+        "INSERT"
+      ],
+      "n_parts": [
+        1
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {}
+      ]
+    }
+  ]
+}

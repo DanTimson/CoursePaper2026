@@ -230,3 +230,43 @@ RUN_KEY="$(.venv/bin/python -c 'import json,sys; r=[json.loads(x) for x in open(
   --config config/layerwise_nnd_hnsw_quality_sift1m.json \
   --construction-results "$BUILD_RESULTS" --construction-run-key "$RUN_KEY"
 ```
+
+## Canonical constructor comparison figures
+
+After the canonical Layerwise/FastHNSW quality records and the direct HNSW
+`BUILD_ONLY` budget are present, generate the cross-constructor result packet
+with:
+
+```bash
+python scripts/make_constructor_figures.py \
+  --results-dir results \
+  --out docs/figures/constructors
+```
+
+This path is intentionally separate from the historical merge-strategy figure
+pipeline. It selects only explicitly named canonical evidence, cross-checks each
+Layerwise/FastHNSW quality record against its exact construction run key, uses
+the direct `BUILD_ONLY` sweep for monolithic construction scaling, and fails on
+ambiguous evidence rather than choosing a cheapest/latest row.
+
+Outputs:
+
+- `constructor_build_scaling.{png,pdf}` — measured construction distance calls
+  versus N; points are connected only, with no fitted power-law trend.
+- `constructor_build_per_vector.{png,pdf}` — construction distance calls per
+  input vector.
+- `layerwise_phase_per_vector.{png,pdf}` — candidate/prune/repair contributions
+  per vector across 10K/100K/1M.
+- `constructor_tradeoff_1m.{png,pdf}` — construction distance calls against
+  matched-recall search distance (`d_s@0.95`) for monolithic HNSW, Layerwise,
+  and FastHNSW pg2.
+- `recall_vs_ds_1m.{png,pdf}` — the underlying Recall@10/search-distance curves.
+- `constructor_summary.csv`, `layerwise_scaling.csv`, and
+  `quality_curves_1m.csv` — machine-readable values used by the figures.
+- `constructor_figures_manifest.json` — exact selected run identities and SHA-256
+  hashes of every input evidence file.
+
+Interpret construction comparisons as **dataset-distance evaluations**, not as a
+claim of equal total CPU/memory work across the different implementations. See
+`docs/CURRENT_METHODOLOGY_REVIEW.md` and
+`docs/RESULTS_FRAMING_LAYERWISE_FASTHNSW.md` for the reviewed wording.

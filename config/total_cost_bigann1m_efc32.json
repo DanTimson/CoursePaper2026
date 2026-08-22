@@ -1,0 +1,137 @@
+{
+  "_comment": [
+    "Secondary canonical end-to-end total-cost experiment for BIGANN 1M at ef_construction=32.",
+    "Canonical secondary matrix is balanced P=[2,4,8,16] only.",
+    "Large-first fixed/adaptive HNSWMerger variants are excluded at ef_construction=32:",
+    "the upstream merger deterministically produced `cand error` during recursive P=4",
+    "large-first merging after 2500+2500->5000 and 5000+2500->7500 succeeded,",
+    "at the final 7500+2500->10000 step. Balanced HNSWMerger P=2/4/8/16 is unaffected.",
+    "SIGM remains excluded from P>2 total-cost accounting for the same methodological reason as in the primary canonical."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "dataset": {
+    "name": "bigann1m",
+    "dim": 128,
+    "nb": 1000000,
+    "base": "data/sift_scales/sift1m_base.fvecs",
+    "query": "data/sift_scales/sift_query.fvecs",
+    "groundtruth": "data/sift_scales/sift1m_gt.ivecs"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 32
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10,
+      50,
+      100,
+      200,
+      400
+    ]
+  },
+  "threads": 1,
+  "workdir": ".work_bigann1m",
+  "results_path": "results/total_cost_bigann1m_efc32.jsonl",
+  "sweep": [
+    {
+      "label": "IGTM tuned",
+      "algo": [
+        "IGTM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 5,
+          "local_ef": 7,
+          "next_step_k": 3,
+          "next_step_ef": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "CGTM tuned",
+      "algo": [
+        "CGTM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "jump_ef": 15,
+          "local_ef": 5,
+          "next_step_k": 3,
+          "search_M": 5
+        }
+      ]
+    },
+    {
+      "label": "NGM search_ef=10",
+      "algo": [
+        "NGM"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "search_ef": 10
+        }
+      ]
+    },
+    {
+      "label": "HNSW-Merger fixed \u03bb0=4, balanced",
+      "algo": [
+        "TWO_MERGE"
+      ],
+      "n_parts": [
+        2,
+        4,
+        8,
+        16
+      ],
+      "order": [
+        "balanced"
+      ],
+      "params": [
+        {
+          "merge_lambda": 4,
+          "merge_lambda_mode": "fixed"
+        }
+      ]
+    }
+  ],
+  "cleanup_merged": true,
+  "experiment_metadata": {
+    "track": "secondary-canonical-efc32",
+    "purpose": "same total-cost experiment as canonical efc200, changing only ef_construction to 32"
+  }
+}

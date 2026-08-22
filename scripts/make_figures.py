@@ -222,11 +222,14 @@ def fig_iso_quality(rows, out, ds="SIFT1M", n_parts=2, target=0.95):
 
 
 def _shared_build_g(rows, p):
-    """Shared P-leaf build (billions) at partition count p, from a true-merge row."""
-    v = next((r.get("build_calc") for r in rows if r.get("builder") == "hnswmerger"
-              and r.get("n_parts") == p and r.get("algo") in TRUE_MERGE
-              and (r.get("build_calc") or 0) > 0), 0) or 0
-    return v / 1e9
+    """Shared P-leaf build (billions) at efc=200, validated across true merges."""
+    vals = {r.get("build_calc") for r in rows
+            if r.get("builder") == "hnswmerger" and r.get("n_parts") == p
+            and r.get("algo") in TRUE_MERGE and _efc_row(r) == 200
+            and (r.get("build_calc") or 0) > 0}
+    if len(vals) > 1:
+        raise ValueError(f"inconsistent shared build_calc for n_parts={p}, efc=200: {sorted(vals)}")
+    return (next(iter(vals)) if vals else 0) / 1e9
 
 
 # ---- merge-STRATEGY view (SIGMOD nomenclature) -----------------------------
@@ -252,32 +255,90 @@ def _canon_caption(algos):
     return "config: " + "; ".join(parts)
 
 
-# Each strategy is summarized by its canonical config, not the cheapest row in a
-# parameter sweep: SIGM at merge_ef_construction=-1 (inherit), HNSW-Merger at
-# lambda=4. This keeps the per-strategy ordering consistent across scales, some of
-# which sweep a knob and some of which do not.
+# Canonical parameter points used by the cross-scale/cross-dataset summary
+# figures. Only parameters actually consumed by each algorithm are matched; the
+# result rows contain the full resolved CppParams set, including irrelevant
+# defaults. These values are the explicit tuned/canonical points in the current
+# configs, not values inferred from whichever row happens to be cheapest.
+CANONICAL_PARAMS = {
+    "IGTM": {"jump_ef": 5, "local_ef": 7, "next_step_k": 3,
+             "next_step_ef": 3, "search_M": 5},
+    "CGTM": {"jump_ef": 15, "local_ef": 5, "next_step_k": 3, "search_M": 5},
+    "NGM": {"search_ef": 10},
+    "TWO_MERGE": {"merge_lambda": 4},
+    "SIGM": {"merge_ef_construction": -1},
+}
+
+
 def _is_canonical(r):
-    p = r.get("params") or {}
+    """Whether a row is the explicitly declared canonical strategy point.
+
+    `order=balanced` is part of the canonical identity when the field exists.
+    This matters for the total-cost files, which also contain fixed/adaptive
+    large-first HNSW-Merger variants with the same initial lambda.
+    """
     algo = r.get("algo")
-    if algo == "TWO_MERGE":
-        return p.get("merge_lambda") == 4          # HNSWMerger canonical lambda
-    if algo == "SIGM":
-        return p.get("merge_ef_construction", -1) in (-1, None)  # inherit ef
-    return True   # NGM/IGTM/CGTM: single canonical config in the grid sweep
+    if r.get("order") not in (None, "balanced"):
+        return False
+    if algo == "INSERT":
+        return True
+    expected = CANONICAL_PARAMS.get(algo)
+    if expected is None:
+        return True  # no policy defined here; callers may use non-strategy rows
+    params = r.get("params") or {}
+    if any(params.get(key) != value for key, value in expected.items()):
+        return False
+    if algo == "TWO_MERGE" and params.get("merge_lambda_mode", "fixed") != "fixed":
+        return False
+    return True
+
+
+def _candidate_identity(r):
+    """Stable identity for duplicate suppression before uniqueness checks."""
+    return r.get("run_key") or json.dumps(r, sort_keys=True)
+
+
+def _canonical_rows(rows, algo, n_parts=None, efc=200):
+    """Explicit canonical HNSWMerger rows, deduplicated by run identity."""
+    selected = {}
+    for r in rows:
+        if r.get("builder") != "hnswmerger" or r.get("algo") != algo:
+            continue
+        if n_parts is not None and r.get("n_parts") != n_parts:
+            continue
+        if efc is not None and _efc_row(r) != efc:
+            continue
+        if not _is_canonical(r):
+            continue
+        selected[_candidate_identity(r)] = r
+    return list(selected.values())
+
+
+def _unique_canonical_row(rows, algo, n_parts=None, efc=200):
+    """Return one canonical row or fail loudly on ambiguous provenance.
+
+    Summary figures must never silently turn multiple eligible rows into a
+    best-observed result. Same-run duplicates are harmless and are deduplicated
+    by `_canonical_rows`; distinct canonical identities are an error.
+    """
+    candidates = _canonical_rows(rows, algo, n_parts=n_parts, efc=efc)
+    if not candidates:
+        return None
+    if len(candidates) != 1:
+        ids = [r.get("run_key") or _pid(r) or "<unkeyed>" for r in candidates]
+        raise ValueError(
+            f"ambiguous canonical rows for {algo} n_parts={n_parts} efc={efc}: {ids}"
+        )
+    return candidates[0]
 
 
 def _strategy_cost(rows, algo, n_parts=2):
     """Single per-strategy cost on the distance axis at efc=200, canonical config."""
     if algo == "INSERT":
-        r = next((r for r in rows if r.get("algo") == "INSERT"
-                  and r.get("builder") == "hnswmerger"
-                  and _efc_row(r) == 200), None)
-        return (r.get("total_calc") if r else None)
-    cands = [r.get("merge_calc") for r in rows
-             if r.get("algo") == algo and r.get("n_parts") == n_parts
-             and r.get("builder") == "hnswmerger" and r.get("merge_calc")
-             and _efc_row(r) == 200 and _is_canonical(r)]
-    return min(cands) if cands else None
+        r = _unique_canonical_row(rows, "INSERT", n_parts=1, efc=200)
+        return r.get("total_calc") if r else None
+    r = _unique_canonical_row(rows, algo, n_parts=n_parts, efc=200)
+    return r.get("merge_calc") if r and r.get("merge_calc") else None
 
 
 def _efc_row(r):
@@ -315,9 +376,7 @@ def fig_cross_dataset(dataset_files, out, scale_label="1M"):
         if not os.path.exists(path):
             print(f"  (cross: skip missing {path})"); continue
         rows = [json.loads(l) for l in open(path) if l.strip()]
-        reb = next((r.get("total_calc") for r in rows
-                    if r.get("algo") == "INSERT" and r.get("builder") == "hnswmerger"
-                    and _efc_row(r) == 200), None)
+        reb = _rebuild_total(rows)
         if not reb:
             print(f"  (cross: no Rebuild for {name})"); continue
         frac = {}
@@ -379,10 +438,7 @@ def fig_cross_scale(dataset_scale_files, out, focus="TWO_MERGE"):
             if not os.path.exists(path):
                 continue
             rows = [json.loads(l) for l in open(path) if l.strip()]
-            reb = next((r.get("total_calc") for r in rows
-                        if r.get("algo") == "INSERT"
-                        and r.get("builder") == "hnswmerger"
-                        and _efc_row(r) == 200), None)
+            reb = _rebuild_total(rows)
             c = _strategy_cost(rows, focus, 2)
             if reb and c:
                 xs.append(N); ys.append(c / reb)
@@ -584,18 +640,14 @@ def _cfg_str(algo, params):
 
 def _rebuild_total(rows):
     """Monolithic rebuild cost (INSERT, P=1, efc=200) from a row set."""
-    return next((r.get("total_calc") for r in rows
-                 if r.get("algo") == "INSERT" and r.get("n_parts") == 1
-                 and r.get("builder") == "hnswmerger" and _efc_row(r) == 200), None)
+    r = _unique_canonical_row(rows, "INSERT", n_parts=1, efc=200)
+    return r.get("total_calc") if r else None
 
 
 def _component_at(rows, algo, n_parts, key):
-    """build_calc / merge_calc / total_calc for canonical (algo, n_parts) at efc200."""
-    cands = [r.get(key) for r in rows
-             if r.get("algo") == algo and r.get("n_parts") == n_parts
-             and r.get("builder") == "hnswmerger" and _efc_row(r) == 200
-             and _is_canonical(r) and r.get(key) is not None]
-    return min(cands) if cands else None
+    """build_calc / merge_calc / total_calc for one explicit canonical row."""
+    r = _unique_canonical_row(rows, algo, n_parts=n_parts, efc=200)
+    return r.get(key) if r and r.get(key) is not None else None
 
 
 
@@ -623,14 +675,9 @@ def make_comparison_table(dataset_files, out, target=0.95, scale_label="1M"):
             if c is None:
                 continue
             # d_s at target from the canonical row's recall curve
-            canon = [r for r in rows if r.get("algo") == algo and r.get("n_parts") == 2
-                     and _efc_row(r) == 200 and _is_canonical(r)]
-            ds_v = None
-            for r in canon:
-                v = _ds_at_recall(r, target)
-                if v is not None:
-                    ds_v = v; break
-            cfg = _cfg_str(algo, canon[0].get("params") if canon else {})
+            canon_row = _unique_canonical_row(rows, algo, n_parts=2, efc=200)
+            ds_v = _ds_at_recall(canon_row, target) if canon_row else None
+            cfg = _cfg_str(algo, canon_row.get("params") if canon_row else {})
             cell[algo] = (c / 1e6, ds_v, cfg)
         per_ds[name] = cell
 
@@ -782,12 +829,11 @@ def fig_total_scaling(rows, out, ds="SIFT1M"):
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
     fig, (axc, axr) = plt.subplots(1, 2, figsize=(13, 4.4), constrained_layout=True)
     for algo in MERGE_ALGOS:
-        tc = [next((r["total_calc"] / 1e9 for r in rows if r.get("algo") == algo
-                    and r.get("n_parts") == p and _is_canonical(r)), None) for p in parts]
-        rc = [next((r.get("recall@10") for r in rows if r.get("algo") == algo
-                    and r.get("n_parts") == p), None) for p in parts]
-        prow = next((r for r in rows if r.get("algo") == algo
-                     and r.get("n_parts") == 2), None)
+        prows = [_unique_canonical_row(rows, algo, n_parts=p, efc=200) for p in parts]
+        tc = [(r.get("total_calc") / 1e9 if r and r.get("total_calc") is not None else None)
+              for r in prows]
+        rc = [(r.get("recall@10") if r else None) for r in prows]
+        prow = _unique_canonical_row(rows, algo, n_parts=2, efc=200)
         cfg = _cfg_str(algo, prow.get("params") if prow else {})
         axc.plot(parts, tc, "o-", color=COLORS[algo], label=f"{disp(algo)} ({cfg})")
         if any(v is not None for v in rc):
@@ -814,13 +860,12 @@ def fig_partition_scaling(rows, out, ds="SIFT1M"):
                     if r.get("builder") == "hnswmerger" and r["algo"] in MERGE_ALGOS})
     fig, (axc, axr) = plt.subplots(1, 2, figsize=(13, 4.4), constrained_layout=True)
     for algo in MERGE_ALGOS:
-        mc = [next((r["merge_calc"] / 1e9 for r in rows if r.get("algo") == algo
-                    and r.get("n_parts") == p), None) for p in parts]
-        rc = [next((r.get("recall@10") for r in rows if r.get("algo") == algo
-                    and r.get("n_parts") == p), None) for p in parts]
+        prows = [_unique_canonical_row(rows, algo, n_parts=p, efc=200) for p in parts]
+        mc = [(r.get("merge_calc") / 1e9 if r and r.get("merge_calc") is not None else None)
+              for r in prows]
+        rc = [(r.get("recall@10") if r else None) for r in prows]
         # config string from the P=2 canonical row for the legend
-        prow = next((r for r in rows if r.get("algo") == algo
-                     and r.get("n_parts") == 2), None)
+        prow = _unique_canonical_row(rows, algo, n_parts=2, efc=200)
         cfg = _cfg_str(algo, prow.get("params") if prow else {})
         lab = f"{disp(algo)} ({cfg})"
         axc.plot(parts, mc, "o-", color=COLORS[algo], label=lab)
@@ -828,10 +873,7 @@ def fig_partition_scaling(rows, out, ds="SIFT1M"):
         if any(v is not None for v in rc):
             axr.plot(parts, rc, "o-", color=COLORS[algo], label=disp(algo))
     # shared build cost (decreasing with partition count) on the cost panel
-    bc = [next((r["build_calc"] / 1e9 for r in rows if r.get("n_parts") == p
-                and r.get("builder") == "hnswmerger" and r.get("algo") in TRUE_MERGE
-                and (r.get("build_calc") or 0) > 0), None)
-          for p in parts]
+    bc = [_shared_build_g(rows, p) or None for p in parts]
     axc.plot(parts, bc, "k--", marker="s", label="build (shared)", alpha=0.6)
     # monolithic rebuild (P=1) reference line
     mono = _rebuild_total(rows)

@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "Secondary canonical direct build-budget sweep at ef_construction=32.",
+    "Same datasets, M=16, threads=1, partitions [1,2,4,8,16] as the efc=200 canonical.",
+    "Workdirs deliberately match the existing sweeps: leaf cache names include ef_construction,",
+    "so efc32 and efc200 artifacts coexist without collision."
+  ],
+  "binaries": {
+    "builds": "$HNSWMERGER_BIN/builds",
+    "exps": "$HNSWMERGER_BIN/exps"
+  },
+  "hnsw": {
+    "M": 16,
+    "ef_construction": 32
+  },
+  "eval": {
+    "k": 10,
+    "kk": 100,
+    "nq": 10000,
+    "efs_array": [
+      10
+    ]
+  },
+  "threads": 1,
+  "partitions": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "results_path": "results/build_budget_bigann_efc32.jsonl",
+  "datasets": [
+    {
+      "name": "bigann10k",
+      "dim": 128,
+      "nb": 10000,
+      "base": "data/sift_scales/sift10k_base.fvecs",
+      "query": "data/sift_scales/sift_query.fvecs",
+      "groundtruth": "data/sift_scales/sift10k_gt.ivecs",
+      "workdir": ".work_bigann10k"
+    },
+    {
+      "name": "bigann100k",
+      "dim": 128,
+      "nb": 100000,
+      "base": "data/sift_scales/sift100k_base.fvecs",
+      "query": "data/sift_scales/sift_query.fvecs",
+      "groundtruth": "data/sift_scales/sift100k_gt.ivecs",
+      "workdir": ".work_bigann100k"
+    },
+    {
+      "name": "bigann1m",
+      "dim": 128,
+      "nb": 1000000,
+      "base": "data/sift_scales/sift1m_base.fvecs",
+      "query": "data/sift_scales/sift_query.fvecs",
+      "groundtruth": "data/sift_scales/sift1m_gt.ivecs",
+      "workdir": ".work_bigann1m"
+    }
+  ],
+  "experiment_metadata": {
+    "track": "secondary-canonical-efc32",
+    "purpose": "same build-budget experiment as canonical efc200, changing only ef_construction to 32"
+  }
+}
